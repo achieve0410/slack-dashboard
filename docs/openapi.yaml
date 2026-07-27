@@ -1,0 +1,763 @@
+openapi: 3.1.0
+info:
+  title: Dashboard Platform API
+  version: 1.0.0
+  description: >-
+    The official platform contract for managing inbox sources, tasks,
+    immutable artifacts, approvals, and audit history around the dashboard.
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local service
+  - url: http://127.0.0.1:8000/api/v1
+    description: Local service by IP
+security:
+  - bearerAuth: []
+tags:
+  - name: Platform
+  - name: Inbox
+  - name: Tasks
+  - name: Artifacts
+  - name: Approvals
+  - name: Events
+  - name: Search
+paths:
+  /:
+    get:
+      tags: [Platform]
+      summary: API capabilities and the authenticated agent
+      responses:
+        "200":
+          description: Platform metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /agents/:
+    get:
+      tags: [Platform]
+      summary: List active agents
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          $ref: "#/components/responses/AgentList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /inbox/:
+    get:
+      tags: [Inbox]
+      summary: List inbox sources
+      parameters:
+        - name: status
+          in: query
+          schema: {type: string}
+        - name: source_type
+          in: query
+          schema: {type: string}
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Inbox list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InboxListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Inbox]
+      summary: Ingest an external source
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InboxCreate"
+      responses:
+        "201":
+          description: Collected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: "#/components/schemas/InboxItem"}
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "428":
+          $ref: "#/components/responses/PreconditionRequired"
+  /tasks/:
+    get:
+      tags: [Tasks]
+      summary: List tasks
+      parameters:
+        - name: status
+          in: query
+          schema: {$ref: "#/components/schemas/TaskStatus"}
+        - name: assigned_agent
+          in: query
+          schema: {type: string}
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Task list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Tasks]
+      summary: Create a task
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: "#/components/schemas/Task"}
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "428":
+          $ref: "#/components/responses/PreconditionRequired"
+  /tasks/{task_id}/:
+    parameters:
+      - $ref: "#/components/parameters/TaskId"
+    get:
+      tags: [Tasks]
+      summary: Task detail
+      responses:
+        "200":
+          description: Task
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: "#/components/schemas/Task"}
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Tasks]
+      summary: Update task fields or status
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskPatch"
+      responses:
+        "200":
+          description: Updated task
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: "#/components/schemas/Task"}
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /tasks/{task_id}/context/:
+    get:
+      tags: [Tasks]
+      summary: Full task context, for agent consumption
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Task context
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskContextResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /artifacts/:
+    get:
+      tags: [Artifacts]
+      summary: List artifact versions
+      parameters:
+        - name: task_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: series_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: kind
+          in: query
+          schema: {$ref: "#/components/schemas/ArtifactKind"}
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Artifact list without content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactListResponse"
+    post:
+      tags: [Artifacts]
+      summary: Create an immutable artifact revision
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArtifactCreate"
+      responses:
+        "201":
+          description: Created artifact version
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: "#/components/schemas/ArtifactWithContent"}
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "428":
+          $ref: "#/components/responses/PreconditionRequired"
+  /artifacts/{artifact_id}/:
+    get:
+      tags: [Artifacts]
+      summary: Read artifact content
+      parameters:
+        - name: artifact_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Artifact
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: "#/components/schemas/ArtifactWithContent"}
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /approvals/:
+    get:
+      tags: [Approvals]
+      summary: List approval requests
+      parameters:
+        - name: task_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: status
+          in: query
+          schema: {$ref: "#/components/schemas/ApprovalStatus"}
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Approval list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalListResponse"
+    post:
+      tags: [Approvals]
+      summary: Request approval of a specific artifact
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalCreate"
+      responses:
+        "201":
+          description: Approval requested
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: "#/components/schemas/Approval"}
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /approvals/{approval_id}/decision/:
+    post:
+      tags: [Approvals]
+      summary: Record an admin approval decision
+      parameters:
+        - name: approval_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalDecision"
+      responses:
+        "200":
+          description: Decided approval
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: "#/components/schemas/Approval"}
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /events/:
+    get:
+      tags: [Events]
+      summary: List audit events
+      parameters:
+        - name: task_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: event_type
+          in: query
+          schema: {type: string}
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Event list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventListResponse"
+  /workflows/{task_id}/:
+    get:
+      tags: [Events]
+      summary: Task status and transition history
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Workflow history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    additionalProperties: true
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /search/:
+    get:
+      tags: [Search]
+      summary: Search platform tasks and the knowledge base together
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: {type: string, minLength: 2}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 50, default: 20}
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: "#/components/schemas/SearchResult"}
+                  meta:
+                    type: object
+                    additionalProperties: true
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: dpt
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128}
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+    Offset:
+      name: offset
+      in: query
+      schema: {type: integer, minimum: 0, default: 0}
+  responses:
+    Unauthorized:
+      description: Missing, invalid, expired or revoked token
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    Forbidden:
+      description: Insufficient scope
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    Conflict:
+      description: State, idempotency or immutable artifact conflict
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    PreconditionRequired:
+      description: Idempotency-Key is required
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    AgentList:
+      description: Agent list
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: array
+                items: {$ref: "#/components/schemas/Agent"}
+              pagination: {$ref: "#/components/schemas/Pagination"}
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+            details: {}
+    Pagination:
+      type: object
+      required: [count, limit, offset, next_offset]
+      properties:
+        count: {type: integer, minimum: 0}
+        limit: {type: integer}
+        offset: {type: integer}
+        next_offset: {type: [integer, "null"]}
+    Agent:
+      type: object
+      required: [key, name, capabilities, is_active]
+      properties:
+        key: {type: string}
+        name: {type: string}
+        capabilities:
+          type: array
+          items: {type: string}
+        metadata: {type: object, additionalProperties: true}
+        is_active: {type: boolean}
+    InboxCreate:
+      type: object
+      additionalProperties: false
+      required: [source_type, title]
+      properties:
+        source_type: {type: string, maxLength: 60}
+        external_id: {type: string, maxLength: 200}
+        title: {type: string, maxLength: 250}
+        content: {type: string}
+        source_url: {type: string, format: uri}
+        payload: {type: object, additionalProperties: true}
+    InboxItem:
+      allOf:
+        - $ref: "#/components/schemas/InboxCreate"
+        - type: object
+          required: [id, status, collected_by, collected_at]
+          properties:
+            id: {type: string, format: uuid}
+            status: {type: string, enum: [collected, processed, rejected]}
+            status_label: {type: string}
+            collected_by: {type: string}
+            collected_at: {type: string, format: date-time}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+    InboxListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items: {$ref: "#/components/schemas/InboxItem"}
+        pagination: {$ref: "#/components/schemas/Pagination"}
+    TaskStatus:
+      type: string
+      enum:
+        - collected
+        - analyzing
+        - draft
+        - needs_review
+        - approved
+        - rejected
+        - revision_requested
+        - queued
+        - executing
+        - completed
+        - failed
+    TaskCreate:
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title: {type: string, maxLength: 250}
+        description: {type: string}
+        priority: {type: string, enum: [low, normal, high, urgent], default: normal}
+        inbox_item_id: {type: string, format: uuid}
+        assigned_agents:
+          type: array
+          items: {type: string}
+        metadata: {type: object, additionalProperties: true}
+        due_at: {type: string, format: date-time}
+    TaskPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        title: {type: string, maxLength: 250}
+        description: {type: string}
+        priority: {type: string, enum: [low, normal, high, urgent]}
+        assigned_agents:
+          type: array
+          items: {type: string}
+        metadata: {type: object, additionalProperties: true}
+        due_at: {type: [string, "null"], format: date-time}
+        status: {$ref: "#/components/schemas/TaskStatus"}
+    Task:
+      allOf:
+        - $ref: "#/components/schemas/TaskCreate"
+        - type: object
+          required: [id, status, created_by, created_at, updated_at]
+          properties:
+            id: {type: string, format: uuid}
+            status: {$ref: "#/components/schemas/TaskStatus"}
+            status_label: {type: string}
+            priority_label: {type: string}
+            created_by: {type: string}
+            completed_at: {type: [string, "null"], format: date-time}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+    TaskListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items: {$ref: "#/components/schemas/Task"}
+        pagination: {$ref: "#/components/schemas/Pagination"}
+    ArtifactKind:
+      type: string
+      enum: [source, analysis, draft, answer, report, result, other]
+    ArtifactCreate:
+      type: object
+      additionalProperties: false
+      required: [task_id, kind, title, content]
+      properties:
+        task_id: {type: string, format: uuid}
+        series_id: {type: string, format: uuid}
+        kind: {$ref: "#/components/schemas/ArtifactKind"}
+        title: {type: string, maxLength: 250}
+        content: {type: string}
+        mime_type: {type: string, default: text/markdown}
+        metadata: {type: object, additionalProperties: true}
+    Artifact:
+      type: object
+      required:
+        - id
+        - series_id
+        - version
+        - task_id
+        - kind
+        - title
+        - storage_uri
+        - sha256
+        - size_bytes
+        - created_by
+        - created_at
+      properties:
+        id: {type: string, format: uuid}
+        series_id: {type: string, format: uuid}
+        version: {type: integer, minimum: 1}
+        task_id: {type: string, format: uuid}
+        kind: {$ref: "#/components/schemas/ArtifactKind"}
+        kind_label: {type: string}
+        title: {type: string}
+        mime_type: {type: string}
+        storage_uri: {type: string}
+        sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        size_bytes: {type: integer, minimum: 0}
+        created_by: {type: string}
+        metadata: {type: object, additionalProperties: true}
+        created_at: {type: string, format: date-time}
+    ArtifactWithContent:
+      allOf:
+        - $ref: "#/components/schemas/Artifact"
+        - type: object
+          required: [content]
+          properties:
+            content: {type: string}
+    ArtifactListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items: {$ref: "#/components/schemas/Artifact"}
+        pagination: {$ref: "#/components/schemas/Pagination"}
+    ApprovalStatus:
+      type: string
+      enum: [pending, approved, rejected, revision_requested]
+    ApprovalCreate:
+      type: object
+      additionalProperties: false
+      required: [task_id, artifact_id]
+      properties:
+        task_id: {type: string, format: uuid}
+        artifact_id: {type: string, format: uuid}
+        note: {type: string}
+    ApprovalDecision:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approved, rejected, revision_requested]
+        note: {type: string}
+    Approval:
+      type: object
+      required:
+        - id
+        - task_id
+        - artifact_id
+        - target_sha256
+        - status
+        - requested_by
+        - requested_at
+      properties:
+        id: {type: string, format: uuid}
+        task_id: {type: string, format: uuid}
+        artifact_id: {type: string, format: uuid}
+        target_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        status: {$ref: "#/components/schemas/ApprovalStatus"}
+        status_label: {type: string}
+        request_note: {type: string}
+        decision_note: {type: string}
+        requested_by: {type: string}
+        decided_by: {type: [string, "null"]}
+        requested_at: {type: string, format: date-time}
+        decided_at: {type: [string, "null"], format: date-time}
+    ApprovalListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items: {$ref: "#/components/schemas/Approval"}
+        pagination: {$ref: "#/components/schemas/Pagination"}
+    Event:
+      type: object
+      required: [id, event_type, entity_type, entity_id, actor, data, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        event_type: {type: string}
+        entity_type: {type: string}
+        entity_id: {type: string}
+        task_id: {type: [string, "null"], format: uuid}
+        actor: {type: string}
+        data: {type: object, additionalProperties: true}
+        created_at: {type: string, format: date-time}
+    EventListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items: {$ref: "#/components/schemas/Event"}
+        pagination: {$ref: "#/components/schemas/Pagination"}
+    TaskContextResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          required: [task, artifacts, approvals, events, allowed_status_transitions]
+          properties:
+            task: {$ref: "#/components/schemas/Task"}
+            inbox_item:
+              oneOf:
+                - $ref: "#/components/schemas/InboxItem"
+                - type: "null"
+            artifacts:
+              type: array
+              items: {$ref: "#/components/schemas/ArtifactWithContent"}
+            approvals:
+              type: array
+              items: {$ref: "#/components/schemas/Approval"}
+            events:
+              type: array
+              items: {$ref: "#/components/schemas/Event"}
+            allowed_status_transitions:
+              type: array
+              items: {$ref: "#/components/schemas/TaskStatus"}
+    SearchResult:
+      type: object
+      required: [type, id, title, excerpt, status, updated_at]
+      properties:
+        type: {type: string, enum: [task, knowledge, artifact]}
+        id: {type: string}
+        task_id: {type: string, format: uuid}
+        title: {type: string}
+        excerpt: {type: string}
+        status: {type: string}
+        source_url: {type: string, format: uri}
+        updated_at: {type: string, format: date-time}

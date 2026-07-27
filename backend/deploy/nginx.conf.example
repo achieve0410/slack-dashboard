@@ -1,0 +1,44 @@
+# Example reverse-proxy config for running Slack Dashboard behind nginx.
+#
+# This is optional: `run-gunicorn.sh` already binds to 127.0.0.1:8000 and can
+# be exposed directly, or behind any reverse proxy you already run. Use this
+# file only if you specifically want nginx.
+#
+# Copy to nginx.conf, replace ${SERVER_NAME} and ${PROJECT_ROOT}, and point
+# `run-nginx.sh` (or your own nginx invocation) at it. For TLS, terminate it
+# at whatever sits in front of this (a load balancer, Caddy, cloudflared,
+# etc.) and proxy plain HTTP to nginx, or add your own `ssl_certificate`
+# directives here.
+
+worker_processes 1;
+pid ${PROJECT_ROOT}/backend/run/nginx.pid;
+
+events {
+  worker_connections 512;
+}
+
+http {
+  include mime.types;
+  default_type application/octet-stream;
+  access_log ${PROJECT_ROOT}/backend/run/nginx-access.log;
+  error_log ${PROJECT_ROOT}/backend/run/nginx-error.log;
+  client_max_body_size 2m;
+  gzip on;
+
+  upstream dashboard_app {
+    server 127.0.0.1:8000;
+  }
+
+  server {
+    listen 8080;
+    server_name ${SERVER_NAME};
+
+    location / {
+      proxy_pass http://dashboard_app;
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+  }
+}

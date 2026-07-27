@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.egg-info/
+
+# Django
+backend/staticfiles/
+backend/frontend_static/
+backend/templates/frontend/
+backend/run/*
+!backend/run/.gitkeep
+db/*.sqlite3
+db/backups/*
+!db/backups/.gitkeep
+db/platform-tokens/
+db/platform-artifacts/
+
+# Secrets / local env
+.env
+secrets/
+*.pem
+*.key
+*.crt
+
+# Node / Nuxt
+node_modules/
+frontend/.nuxt/
+frontend/.output/
+frontend/dist
+frontend/.env
+
+# MySQL data dir
+db/slack_dashboard_db/data/*
+!db/slack_dashboard_db/data/.gitkeep
+db/slack_dashboard_db/.env
+
+# Editor / OS
+.DS_Store
+*.log
+
+# Internal planning notes (not for public history)
+plan.md

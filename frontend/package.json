@@ -1,0 +1,28 @@
+{
+  "name": "slack-dashboard-frontend",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.11"
+  },
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build --prerender && node scripts/sync-django.mjs",
+    "typecheck": "nuxt typecheck",
+    "lint": "eslint .",
+    "test:unit": "node --experimental-strip-types scripts/test-utils.mjs && node scripts/test-dashboard-regressions.mjs && node scripts/test-quiz-regressions.mjs && node scripts/test-knowledge-tags-regressions.mjs",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "nuxt": "4.4.8",
+    "vue": "3.5.39",
+    "vue-router": "5.1.0"
+  },
+  "devDependencies": {
+    "@nuxt/eslint": "1.16.0",
+    "eslint": "10.7.0",
+    "typescript": "5.9.3",
+    "vue-tsc": "3.2.5",
+    "@types/node": "24.13.3"
+  }
+}

@@ -1,0 +1,8 @@
+Django>=6.0,<6.1
+gunicorn>=23,<24
+slack-sdk>=3.39,<4
+whitenoise>=6.11,<7
+anthropic>=0.120,<1
+openai>=2.48,<3
+
+# Optional: only needed if DJANGO_DB_ENGINE=mysql (see requirements-mysql.txt)

@@ -1,0 +1,16 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+  <form method="post">
+    {% csrf_token %}
+    <p>선택한 항목을 활성 카테고리로 승인하거나 재지정합니다.</p>
+    {{ form.as_p }}
+    {% for item in items %}
+      <input type="hidden" name="{{ action_checkbox_name }}" value="{{ item.pk }}">
+    {% endfor %}
+    <input type="hidden" name="action" value="approve_classification">
+    <input type="hidden" name="apply" value="1">
+    <input type="submit" value="승인/재지정">
+  </form>
+{% endblock %}

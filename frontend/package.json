@@ -23,7 +23,7 @@
     "@nuxt/eslint": "1.16.0",
     "eslint": "10.8.0",
     "typescript": "5.9.3",
-    "vue-tsc": "3.2.5",
+    "vue-tsc": "3.3.8",
     "@types/node": "22.20.1",
     "cac": "7.0.0",
     "commander": "15.0.0"

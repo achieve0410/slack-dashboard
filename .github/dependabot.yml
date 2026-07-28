@@ -8,6 +8,15 @@ updates:
       time: "09:00"
       timezone: Asia/Seoul
     open-pull-requests-limit: 5
+    allow:
+      - dependency-name: django
+      - dependency-name: gunicorn
+      - dependency-name: slack-sdk
+      - dependency-name: whitenoise
+      - dependency-name: anthropic
+      - dependency-name: openai
+      - dependency-name: mcp
+      - dependency-name: mysqlclient
 
   - package-ecosystem: npm
     directory: /frontend

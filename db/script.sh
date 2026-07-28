@@ -2,7 +2,7 @@
 set -euo pipefail
 
 DB_ROOT="$(cd "$(dirname "$0")" && pwd)"
-COMPOSE_FILE="$DB_ROOT/docker_compose/docker-compose-slack-dashboard.yml"
+COMPOSE_FILE="$DB_ROOT/docker_compose/compose.yml"
 ENV_FILE="$DB_ROOT/slack_dashboard_db/.env"
 PROJECT_NAME="slack_dashboard_db"
 

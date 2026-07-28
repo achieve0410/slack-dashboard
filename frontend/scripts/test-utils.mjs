@@ -75,6 +75,9 @@ assert.match(rendered, /href="https:\/\/example\.com\/&quot; onmouseover=&quot;a
 assert.doesNotMatch(rendered, /" onmouseover="/)
 assert.doesNotMatch(rendered, /href="javascript:/)
 
+const nestedEntityRendered = renderMarkdownContent('&amp;lt;script&amp;gt;')
+assert.equal(nestedEntityRendered, '<p>&amp;lt;script&amp;gt;</p>')
+
 const markdownRendered = renderMarkdownContent(
   '## 제목\n\n- **요약** [공식 문서](https://example.com/docs)\n\nBot Answer',
 )

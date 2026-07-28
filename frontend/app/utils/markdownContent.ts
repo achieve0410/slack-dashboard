@@ -9,9 +9,9 @@ function escapeHtml(value: string): string {
 
 function decodeSlackEntities(value: string): string {
   return value
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
 }
 
 function renderText(value: string): string {

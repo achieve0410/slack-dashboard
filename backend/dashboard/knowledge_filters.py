@@ -31,6 +31,7 @@ PAGINATION_KEYS = ("limit", "offset")
 class KnowledgeFilterError(ValueError):
     def __init__(self, message: str, *, code: str = "invalid_filter", status: int = 400):
         super().__init__(message)
+        self.message = message
         self.code = code
         self.status = status
 

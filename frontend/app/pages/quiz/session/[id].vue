@@ -26,7 +26,10 @@ async function load() {
   feedback.value = null
   selectedChoiceIds.value = []
   try {
-    const data = await quiz.session(String(route.params.id))
+    const [, data] = await Promise.all([
+      quiz.catalog(),
+      quiz.session(String(route.params.id)),
+    ])
     session.value = data
     if (data.status === 'completed') await router.replace(`/quiz/result/${data.session_id}`)
   }
@@ -92,7 +95,7 @@ function choiceInputType(item: QuizCurrentItem): 'checkbox' | 'radio' {
     <header class="page-command-bar">
       <div>
         <p class="eyebrow">QUIZ SESSION</p>
-        <h1>{{ session ? `${quizDomainLabels[session.domain]} · ${quizDifficultyLabels[session.difficulty]}` : '퀴즈 세션' }}</h1>
+        <h1>{{ session ? `${quiz.domainLabel(session.domain)} · ${quizDifficultyLabels[session.difficulty]}` : '퀴즈 세션' }}</h1>
         <p>{{ session ? `${quizModeLabels[session.mode]} 모드 · ${session.required_count}문제` : '세션을 불러오는 중입니다.' }}</p>
       </div>
       <NuxtLink class="ghost-button" to="/quiz">퀴즈 홈</NuxtLink>

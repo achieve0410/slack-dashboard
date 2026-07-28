@@ -9,13 +9,13 @@ from .models import (
     KnowledgeItem,
     QuizProgress,
     QuizQuestion,
+    QuizDomainConfig,
     QuizSession,
     QuizSessionItem,
 )
 
 
 REQUIRED_COUNT = 10
-SUPPORTED_DOMAINS = ("english", "japanese", "aws_saa")
 SUPPORTED_DIFFICULTIES = ("beginner", "intermediate", "advanced")
 SUPPORTED_MODES = ("new", "review", "wrong")
 SUPPORTED_TYPES = ("single_choice", "multiple_select")
@@ -49,6 +49,7 @@ def eligible_questions():
         QuizQuestion.objects.filter(
             publish_state=QuizQuestion.PublishState.PUBLISHED,
             is_active=True,
+            domain__in=QuizDomainConfig.objects.filter(enabled=True).values("slug"),
             knowledge_item__status=KnowledgeItem.Status.CLASSIFIED,
             knowledge_item__hidden_at__isnull=True,
             knowledge_item__consumption_state__archived_at__isnull=True,
@@ -64,6 +65,7 @@ def eligible_questions():
 
 def catalog_payload() -> dict:
     questions = eligible_questions()
+    domain_configs = list(QuizDomainConfig.objects.filter(enabled=True))
     counts = {
         f"{row['domain']}:{row['difficulty']}": row["count"]
         for row in questions.values("domain", "difficulty")
@@ -72,7 +74,17 @@ def catalog_payload() -> dict:
     }
     total = sum(counts.values())
     return {
-        "domains": list(SUPPORTED_DOMAINS),
+        "domains": [config.slug for config in domain_configs],
+        "domain_configs": [
+            {
+                "slug": config.slug,
+                "label": config.label,
+                "category_path": config.category_path,
+                "question_types": config.allowed_question_types,
+                "requires_allowlist": config.requires_allowlist,
+            }
+            for config in domain_configs
+        ],
         "difficulty_levels": list(SUPPORTED_DIFFICULTIES),
         "question_types": list(SUPPORTED_TYPES),
         "available_counts": counts,
@@ -93,7 +105,7 @@ def parse_session_request(data: dict) -> tuple[str, str, str]:
     domain = data["domain"]
     difficulty = data["difficulty"]
     mode = data["mode"]
-    if domain not in SUPPORTED_DOMAINS:
+    if not QuizDomainConfig.objects.filter(slug=domain, enabled=True).exists():
         raise QuizApiError(400, "invalid_domain")
     if difficulty not in SUPPORTED_DIFFICULTIES:
         raise QuizApiError(400, "invalid_difficulty")

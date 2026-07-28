@@ -10,10 +10,11 @@ const emit = defineEmits<{
   tagClick: [tag: string]
 }>()
 const route = useRoute()
+const { intlLocale } = useDashboardLocale()
 
 const detailLink = computed(() => detailUrlWithKnowledgeContext(props.item.detail_url, route.query))
 
-const formattedDate = computed(() => new Intl.DateTimeFormat('ko-KR', {
+const formattedDate = computed(() => new Intl.DateTimeFormat(intlLocale.value, {
   month: 'short',
   day: 'numeric',
   hour: '2-digit',
@@ -62,8 +63,9 @@ function handleTagClick(tag: string) {
       </button>
     </div>
     <footer class="run-card-footer">
-      <span :class="['knowledge-status', `status-${item.status}`]">
-        {{ item.status_label }}
+      <span>
+        <span :class="['knowledge-status', `status-${item.status}`]">{{ item.status_label }}</span>
+        <span :class="['verification-badge', `verification-${item.verification.status}`]">{{ item.verification.status_label }}</span>
       </span>
       <span class="run-signals">
         <span>{{ item.source_label }}</span>

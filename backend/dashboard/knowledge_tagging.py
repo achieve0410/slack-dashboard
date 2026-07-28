@@ -220,7 +220,12 @@ def create_default_runner(*, timeout: int = TAGGING_TIMEOUT) -> LLMTaggingRunner
 def invoke_llm_tagging(config: llm.LLMConfig, prompt: dict, timeout: int) -> str:
     prompt_text = json.dumps(prompt, ensure_ascii=False, separators=(",", ":"))
     try:
-        response = llm.complete(config, prompt_text, timeout=timeout)
+        response = llm.complete(
+            config,
+            prompt_text,
+            timeout=timeout,
+            operation="tagging",
+        )
     except llm.LLMTransportError as error:
         raise KnowledgeTaggingError("tag_generation") from error
     if len(response.text.encode()) > MAX_TAGGING_OUTPUT_BYTES:

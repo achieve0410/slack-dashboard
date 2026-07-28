@@ -15,6 +15,7 @@ FILTER_KEYS = (
     "tag",
     "category",
     "status",
+    "verification",
     "source_type",
     "read",
     "bookmarked",
@@ -133,6 +134,12 @@ def parse_knowledge_filters(
             raise KnowledgeFilterError("올바른 status가 아닙니다.")
         values["status"] = status
 
+    verification = _single_value(params, "verification")
+    if verification not in (None, ""):
+        if verification not in KnowledgeItem.VerificationStatus.values:
+            raise KnowledgeFilterError("올바른 verification이 아닙니다.")
+        values["verification"] = verification
+
     source_type = _single_value(params, "source_type")
     if source_type not in (None, ""):
         if source_type not in KnowledgeItem.SourceType.values:
@@ -244,6 +251,23 @@ def apply_knowledge_filters(
 
     if "status" in values:
         queryset = queryset.filter(status=values["status"])
+    if "verification" in values:
+        checked_at = timezone.now()
+        stale = (
+            Q(verification_status=KnowledgeItem.VerificationStatus.STALE)
+            | Q(classification_stale_at__isnull=False)
+            | Q(review_due_at__isnull=False, review_due_at__lte=checked_at)
+        )
+        if values["verification"] == KnowledgeItem.VerificationStatus.STALE:
+            queryset = queryset.filter(stale)
+        elif values["verification"] == KnowledgeItem.VerificationStatus.VERIFIED:
+            queryset = queryset.filter(
+                verification_status=KnowledgeItem.VerificationStatus.VERIFIED
+            ).exclude(stale)
+        else:
+            queryset = queryset.filter(
+                verification_status=KnowledgeItem.VerificationStatus.UNVERIFIED
+            ).exclude(stale)
     if "source_type" in values:
         queryset = queryset.filter(source_type=values["source_type"])
     if values.get("read") == "read":

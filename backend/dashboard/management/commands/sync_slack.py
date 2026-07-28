@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from django.core.management.base import BaseCommand, CommandError
@@ -12,6 +13,7 @@ from dashboard.models import (
     ContentRun,
     CronJob,
     FreeQuestionMessage,
+    KnowledgeItem,
 )
 from dashboard.operation_runs import (
     finish_operation,
@@ -33,9 +35,34 @@ logger = logging.getLogger(__name__)
 BOT_MESSAGE_SUBTYPES = {None, "bot_message", "thread_broadcast"}
 
 
+@dataclass(frozen=True)
+class ChannelSyncResult:
+    imported: int
+    deleted: int
+    cursor_ts: str
+
+
 def _env_channel_list(name: str) -> list[str]:
     raw = os.getenv(name, "")
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _latest_ts(values) -> str:
+    timestamps = []
+    for value in values:
+        if value is None:
+            continue
+        normalized = str(value).strip()
+        if normalized:
+            timestamps.append(normalized)
+    for value in timestamps:
+        if not re.fullmatch(r"\d+\.\d+", value):
+            raise CommandError(f"Invalid Slack timestamp: {value}")
+    return max(timestamps, key=float) if timestamps else ""
+
+
+def _newer_ts(*values: str) -> str:
+    return _latest_ts(values)
 
 
 class Command(BaseCommand):
@@ -75,6 +102,19 @@ class Command(BaseCommand):
         parser.add_argument(
             "--schedule-channel",
             default=os.getenv("SLACK_DASHBOARD_SCHEDULE_CHANNEL", ""),
+        )
+        parser.add_argument(
+            "--oldest",
+            default="",
+            help="Only import knowledge-channel messages newer than this Slack timestamp.",
+        )
+        parser.add_argument(
+            "--full-rescan",
+            action="store_true",
+            help=(
+                "Ignore saved channel checkpoints and reconcile messages deleted "
+                "from Slack. Use periodically, not on every run."
+            ),
         )
 
     def handle(self, *args, **options):
@@ -128,6 +168,7 @@ class Command(BaseCommand):
         summary = {
             "channels_synced": 0,
             "runs_imported": 0,
+            "runs_deleted": 0,
             "questions_imported": 0,
             "schedule_created": 0,
             "schedule_updated": 0,
@@ -139,11 +180,21 @@ class Command(BaseCommand):
         if channels is None:
             channels = _env_channel_list("SLACK_KNOWLEDGE_CHANNELS")
         for channel_id in channels:
-            imported = self.sync_knowledge_channel(client, channel_id, bot_user_id)
-            summary["runs_imported"] += imported
+            result = self.sync_knowledge_channel(
+                client,
+                channel_id,
+                bot_user_id,
+                oldest=options["oldest"],
+                full_rescan=options["full_rescan"],
+            )
+            summary["runs_imported"] += result.imported
+            summary["runs_deleted"] += result.deleted
             summary["channels_synced"] += 1
             self.stdout.write(
-                self.style.SUCCESS(f"Channel {channel_id}: imported {imported} item(s)")
+                self.style.SUCCESS(
+                    f"Channel {channel_id}: imported {result.imported}, "
+                    f"deleted {result.deleted}, cursor {result.cursor_ts or '-'}"
+                )
             )
 
         free_question_channel = options["free_question_channel"]
@@ -192,7 +243,10 @@ class Command(BaseCommand):
         client: WebClient,
         channel_id: str,
         bot_user_id: str,
-    ) -> int:
+        *,
+        oldest: str = "",
+        full_rescan: bool = False,
+    ) -> ChannelSyncResult:
         channel_name = self.channel_display_name(client, channel_id)
         job, _ = CronJob.objects.update_or_create(
             external_id=f"channel:{channel_id}",
@@ -205,13 +259,28 @@ class Command(BaseCommand):
                 "thread_ts": "",
                 "enabled": True,
                 "state": "active",
-                "last_status": "",
-                "last_error": "",
+                "disconnected_at": None,
             },
         )
 
-        messages = self.fetch_channel(client, channel_id)
+        checkpoint = "" if full_rescan else _newer_ts(job.sync_cursor_ts, oldest)
+        try:
+            messages = self.fetch_channel(client, channel_id, oldest=checkpoint)
+        except Exception as error:
+            job.last_run_at = datetime.now(tz=UTC)
+            job.last_status = "error"
+            job.last_error = type(error).__name__
+            job.save(
+                update_fields=[
+                    "last_run_at",
+                    "last_status",
+                    "last_error",
+                    "updated_at",
+                ]
+            )
+            raise
         run_ids: list[int] = []
+        fetched_timestamps: set[str] = set()
         for message in messages:
             if message.get("subtype") not in BOT_MESSAGE_SUBTYPES:
                 continue
@@ -221,6 +290,15 @@ class Command(BaseCommand):
             ts = str(message.get("ts") or "")
             if not ts:
                 continue
+            fetched_timestamps.add(ts)
+            existing_run = ContentRun.objects.filter(external_ts=ts).only(
+                "hidden_at",
+                "structured_data",
+            ).first()
+            restore_source_deleted = bool(
+                existing_run
+                and (existing_run.structured_data or {}).get("source_deleted")
+            )
             run, _ = ContentRun.objects.update_or_create(
                 external_ts=ts,
                 defaults={
@@ -234,24 +312,78 @@ class Command(BaseCommand):
                     "generated_at": slack_ts_to_datetime(ts),
                 },
             )
+            if restore_source_deleted:
+                if run.hidden_at:
+                    run.hidden_at = None
+                    run.save(update_fields=["hidden_at", "updated_at"])
+                KnowledgeItem.objects.filter(content_run=run).update(hidden_at=None)
             Citation.objects.filter(run=run).delete()
             Citation.objects.bulk_create(
                 [Citation(run=run, **citation) for citation in extract_citations(text)]
             )
             run_ids.append(run.pk)
 
+        deleted = 0
+        if full_rescan:
+            missing_runs = ContentRun.objects.filter(
+                job=job,
+                external_ts__isnull=False,
+                hidden_at__isnull=True,
+            )
+            if fetched_timestamps:
+                missing_runs = missing_runs.exclude(
+                    external_ts__in=fetched_timestamps
+                )
+            hidden_at = datetime.now(tz=UTC)
+            missing = list(missing_runs)
+            missing_ids = [run.pk for run in missing]
+            if missing:
+                for run in missing:
+                    run.hidden_at = hidden_at
+                    run.updated_at = hidden_at
+                    run.structured_data = {
+                        **(run.structured_data or {}),
+                        "source_deleted": True,
+                    }
+                ContentRun.objects.bulk_update(
+                    missing,
+                    ["hidden_at", "structured_data", "updated_at"],
+                )
+                deleted = len(missing)
+                KnowledgeItem.objects.filter(
+                    content_run_id__in=missing_ids,
+                ).update(hidden_at=hidden_at)
+
+        cursor_ts = _latest_ts(
+            [job.sync_cursor_ts, *fetched_timestamps],
+        )
+        reconcile_stats = reconcile_cron_runs(run_ids) if run_ids else None
+
         job.last_run_at = datetime.now(tz=UTC)
         job.last_status = "success"
-        job.save(update_fields=["last_run_at", "last_status", "updated_at"])
-
-        if not run_ids:
-            return 0
-        reconcile_stats = reconcile_cron_runs(run_ids)
-        self.stdout.write(
-            f"cron_reconcile channel={channel_id} "
-            + " ".join(f"{key}={value}" for key, value in sorted(reconcile_stats.items()))
+        job.last_error = ""
+        job.sync_cursor_ts = cursor_ts
+        job.last_import_count = len(run_ids)
+        job.save(
+            update_fields=[
+                "last_run_at",
+                "last_status",
+                "last_error",
+                "sync_cursor_ts",
+                "last_import_count",
+                "updated_at",
+            ]
         )
-        return len(run_ids)
+
+        if reconcile_stats is not None:
+            self.stdout.write(
+                f"cron_reconcile channel={channel_id} "
+                + " ".join(
+                    f"{key}={value}"
+                    for key, value in sorted(reconcile_stats.items())
+                )
+            )
+        return ChannelSyncResult(len(run_ids), deleted, cursor_ts)
 
     @staticmethod
     def channel_display_name(client: WebClient, channel_id: str) -> str:
@@ -265,11 +397,18 @@ class Command(BaseCommand):
     # -- free-question channel ----------------------------------------------
 
     @staticmethod
-    def fetch_channel(client: WebClient, channel_id: str) -> list[dict]:
+    def fetch_channel(
+        client: WebClient,
+        channel_id: str,
+        *,
+        oldest: str = "",
+    ) -> list[dict]:
         messages: dict[str, dict] = {}
         cursor = ""
         while True:
             kwargs = {"channel": channel_id, "limit": 200}
+            if oldest:
+                kwargs.update({"oldest": oldest, "inclusive": False})
             if cursor:
                 kwargs["cursor"] = cursor
             response = client.conversations_history(**kwargs)

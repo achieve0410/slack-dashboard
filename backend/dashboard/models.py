@@ -41,6 +41,9 @@ class CronJob(models.Model):
     last_error = models.TextField(blank=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
     next_run_at = models.DateTimeField(null=True, blank=True)
+    sync_cursor_ts = models.CharField(max_length=50, blank=True)
+    last_import_count = models.PositiveIntegerField(default=0)
+    disconnected_at = models.DateTimeField(null=True, blank=True, db_index=True)
     model_name = models.CharField(max_length=100, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -294,6 +297,11 @@ class KnowledgeItem(models.Model):
         CLASSIFIED = "classified", "분류 완료"
         NEEDS_REVIEW = "needs_review", "검토 필요"
 
+    class VerificationStatus(models.TextChoices):
+        UNVERIFIED = "unverified", "미검증"
+        VERIFIED = "verified", "검증됨"
+        STALE = "stale", "재검토 필요"
+
     source_type = models.CharField(max_length=10, choices=SourceType.choices)
     source_key = models.CharField(max_length=180, unique=True)
     content_run = models.OneToOneField(
@@ -339,6 +347,25 @@ class KnowledgeItem(models.Model):
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
     classification_stale_at = models.DateTimeField(null=True, blank=True)
+    verification_status = models.CharField(
+        max_length=12,
+        choices=VerificationStatus.choices,
+        default=VerificationStatus.UNVERIFIED,
+        db_index=True,
+    )
+    verification_owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="owned_knowledge_verifications",
+    )
+    verified_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    review_due_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    verification_note = models.TextField(
+        blank=True,
+        validators=[MaxLengthValidator(1000)],
+    )
     slack_channel_id = models.CharField(max_length=50, blank=True, db_index=True)
     slack_thread_ts = models.CharField(max_length=50, blank=True, db_index=True)
     slack_source_url = models.URLField(max_length=700, blank=True)
@@ -409,6 +436,13 @@ class KnowledgeItem(models.Model):
                 ),
                 name="knowledge_confidence_between_0_and_1",
             ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(verification_status="verified")
+                    | models.Q(verified_at__isnull=False)
+                ),
+                name="knowledge_verified_has_timestamp",
+            ),
         ]
 
     def clean(self):
@@ -446,11 +480,46 @@ class KnowledgeItem(models.Model):
                 errors["classified_at"] = "분류 완료 시각이 필요합니다."
         elif self.category_id or self.classified_at:
             errors["status"] = "분류 전 항목에는 카테고리나 분류 완료 시각을 지정할 수 없습니다."
+        if (
+            self.verification_status == self.VerificationStatus.VERIFIED
+            and not self.verified_at
+        ):
+            errors["verified_at"] = "검증 완료 시각이 필요합니다."
         if errors:
             raise ValidationError(errors)
 
     def __str__(self) -> str:
         return self.title
+
+
+class KnowledgeFeedback(models.Model):
+    class Kind(models.TextChoices):
+        HELPFUL = "helpful", "도움됨"
+        INCORRECT = "incorrect", "틀림"
+        OUTDATED = "outdated", "오래됨"
+
+    knowledge_item = models.ForeignKey(
+        KnowledgeItem,
+        on_delete=models.CASCADE,
+        related_name="feedback_entries",
+    )
+    kind = models.CharField(max_length=12, choices=Kind.choices, db_index=True)
+    comment = models.TextField(blank=True, validators=[MaxLengthValidator(1000)])
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="knowledge_feedback_entries",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def clean(self):
+        super().clean()
+        self.comment = self.comment.strip()
 
 
 class KnowledgeConsumptionState(models.Model):
@@ -890,6 +959,78 @@ class OperationRun(models.Model):
         )
 
 
+class LLMUsageRecord(models.Model):
+    class Operation(models.TextChoices):
+        CLASSIFY = "classify", "분류"
+        TAGGING = "tagging", "태깅"
+        QUIZ = "quiz", "퀴즈"
+        ASK = "ask", "질문"
+
+    operation = models.CharField(max_length=12, choices=Operation.choices, db_index=True)
+    provider = models.CharField(max_length=20)
+    model_name = models.CharField(max_length=100)
+    input_tokens = models.PositiveIntegerField(default=0)
+    output_tokens = models.PositiveIntegerField(default=0)
+    total_tokens = models.PositiveIntegerField(default=0)
+    api_calls = models.PositiveIntegerField(default=1)
+    estimated_cost_usd = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(
+                fields=["operation", "-created_at"],
+                name="llm_usage_op_created_idx",
+            )
+        ]
+
+
+class KnowledgeAsk(models.Model):
+    class Feedback(models.TextChoices):
+        HELPFUL = "helpful", "도움됨"
+        UNHELPFUL = "unhelpful", "도움 안 됨"
+
+    question = models.TextField(validators=[MaxLengthValidator(1000)])
+    answer = models.TextField()
+    insufficient_evidence = models.BooleanField(default=False)
+    provider = models.CharField(max_length=20, blank=True)
+    model_name = models.CharField(max_length=100, blank=True)
+    usage = models.JSONField(default=dict, blank=True)
+    feedback = models.CharField(max_length=12, choices=Feedback.choices, blank=True)
+    feedback_note = models.TextField(blank=True, validators=[MaxLengthValidator(1000)])
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+
+class KnowledgeAskSource(models.Model):
+    ask = models.ForeignKey(
+        KnowledgeAsk,
+        on_delete=models.CASCADE,
+        related_name="sources",
+    )
+    knowledge_item = models.ForeignKey(
+        KnowledgeItem,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ask_citations",
+    )
+    rank = models.PositiveSmallIntegerField()
+    title = models.CharField(max_length=250)
+    excerpt = models.TextField(validators=[MaxLengthValidator(1000)])
+    source_url = models.URLField(max_length=700, blank=True)
+
+    class Meta:
+        ordering = ["rank", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["ask", "rank"], name="unique_ask_source_rank")
+        ]
+
+
 class QuizGenerationBatch(models.Model):
     class Status(models.TextChoices):
         DRY_RUN = "dry_run", "Dry run"
@@ -939,6 +1080,54 @@ def _is_sha256_digest(value: str) -> bool:
     return len(value) == 64 and all(character in "0123456789abcdef" for character in value)
 
 
+class QuizDomainConfig(models.Model):
+    slug = models.SlugField(max_length=20, primary_key=True)
+    label = models.CharField(max_length=80)
+    category_path = models.CharField(max_length=400, unique=True)
+    allowed_question_types = models.JSONField(default=list)
+    requires_allowlist = models.BooleanField(default=False)
+    enabled = models.BooleanField(default=True, db_index=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["sort_order", "slug"]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        self.slug = self.slug.strip().lower()
+        self.label = self.label.strip()
+        self.category_path = "/".join(
+            Category.normalize_segment(segment) for segment in self.category_path.split("/")
+        )
+        if not self.slug:
+            errors["slug"] = "도메인 식별자를 입력해주세요."
+        if not self.label:
+            errors["label"] = "도메인 이름을 입력해주세요."
+        if not self.category_path or len(self.category_path.split("/")) > 3:
+            errors["category_path"] = "카테고리 경로는 1~3단계여야 합니다."
+        allowed = {"single_choice", "multiple_select"}
+        if (
+            not isinstance(self.allowed_question_types, list)
+            or not self.allowed_question_types
+            or any(value not in allowed for value in self.allowed_question_types)
+        ):
+            errors["allowed_question_types"] = "지원하는 문항 형식을 하나 이상 지정해주세요."
+        else:
+            self.allowed_question_types = list(dict.fromkeys(self.allowed_question_types))
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return self.label
+
+
 class QuizQuestion(models.Model):
     class Domain(models.TextChoices):
         ENGLISH = "english", "English"
@@ -972,7 +1161,7 @@ class QuizQuestion(models.Model):
         on_delete=models.PROTECT,
         related_name="quiz_questions",
     )
-    domain = models.CharField(max_length=20, choices=Domain.choices, db_index=True)
+    domain = models.CharField(max_length=20, db_index=True)
     difficulty = models.CharField(
         max_length=20,
         choices=Difficulty.choices,
@@ -1214,7 +1403,7 @@ class QuizSession(models.Model):
         ABANDONED = "abandoned", "Abandoned"
 
     session_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
-    domain = models.CharField(max_length=20, choices=Domain.choices, db_index=True)
+    domain = models.CharField(max_length=20, db_index=True)
     difficulty = models.CharField(max_length=20, choices=Difficulty.choices, db_index=True)
     mode = models.CharField(max_length=10, choices=Mode.choices, default=Mode.NEW)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.ACTIVE)

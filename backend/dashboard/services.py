@@ -195,6 +195,13 @@ def reconcile_cron_runs(run_ids: Iterable[int] | None = None) -> dict[str, int]:
                 "generated_at": run.generated_at,
                 "hidden_at": existing.hidden_at or run.hidden_at,
             }
+            source_changed = existing.source_hash != current_hash
+            if source_changed:
+                base_updates["verification_status"] = (
+                    KnowledgeItem.VerificationStatus.STALE
+                    if existing.verified_at
+                    else KnowledgeItem.VerificationStatus.UNVERIFIED
+                )
             manual_override = (
                 existing.classification_model == "manual"
                 and existing.reviewed_at is not None
@@ -211,7 +218,7 @@ def reconcile_cron_runs(run_ids: Iterable[int] | None = None) -> dict[str, int]:
                     "answer": "",
                     "source_hash": current_hash,
                 }
-            elif existing.source_hash != current_hash:
+            elif source_changed:
                 stats["source_resets"] += 1
                 has_body = bool((run.body or "").strip())
                 updates = {
@@ -368,7 +375,14 @@ def reconcile_slack_thread(thread_ts: str, *, workspace_url: str = "") -> dict[s
                     "slack_thread_ts": thread_ts,
                     "slack_source_url": source_url or existing.slack_source_url,
                 }
-                if existing.source_hash != current_hash:
+                source_changed = existing.source_hash != current_hash
+                if source_changed:
+                    base_updates["verification_status"] = (
+                        KnowledgeItem.VerificationStatus.STALE
+                        if existing.verified_at
+                        else KnowledgeItem.VerificationStatus.UNVERIFIED
+                    )
+                if source_changed:
                     stats["source_resets"] += 1
                     updates = {
                         **base_updates,

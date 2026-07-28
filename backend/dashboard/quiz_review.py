@@ -5,7 +5,14 @@ from django.db import transaction
 from django.db.models import Count, F, Q
 from django.utils import timezone
 
-from .models import KnowledgeItem, QuizProgress, QuizQuestion, QuizSession, QuizSessionItem
+from .models import (
+    KnowledgeItem,
+    QuizDomainConfig,
+    QuizProgress,
+    QuizQuestion,
+    QuizSession,
+    QuizSessionItem,
+)
 from .quiz_sessions import QuizApiError, knowledge_detail_url
 
 
@@ -37,6 +44,7 @@ def eligible_review_questions():
         QuizQuestion.objects.filter(
             publish_state=QuizQuestion.PublishState.PUBLISHED,
             is_active=True,
+            domain__in=QuizDomainConfig.objects.filter(enabled=True).values("slug"),
             knowledge_item__status=KnowledgeItem.Status.CLASSIFIED,
             knowledge_item__hidden_at__isnull=True,
             knowledge_item__consumption_state__archived_at__isnull=True,
@@ -116,7 +124,10 @@ def review_payload(params: dict) -> dict:
     domain = params.get("domain", "")
     difficulty = params.get("difficulty", "")
     due_only = params.get("due_only", "")
-    if domain and domain not in {"english", "japanese", "aws_saa"}:
+    if domain and not QuizDomainConfig.objects.filter(
+        slug=domain,
+        enabled=True,
+    ).exists():
         raise QuizApiError(400, "invalid_filter")
     if difficulty and difficulty not in {"beginner", "intermediate", "advanced"}:
         raise QuizApiError(400, "invalid_filter")

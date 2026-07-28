@@ -48,6 +48,7 @@ SUMMARY_KEYS = frozenset(
         "usage_reports",
         "channels_synced",
         "runs_imported",
+        "runs_deleted",
         "questions_imported",
         "schedule_created",
         "schedule_updated",

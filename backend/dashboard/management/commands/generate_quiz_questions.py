@@ -8,6 +8,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from dashboard import llm
+from dashboard.models import QuizDomainConfig
 from dashboard.operation_runs import finish_operation, prune_operation_runs, start_operation
 from dashboard.quiz_generation import (
     MAX_ATTEMPTS,
@@ -33,7 +34,7 @@ class Command(BaseCommand):
         parser.add_argument("--publish", action="store_true")
         parser.add_argument("--dry-run", action="store_true")
         parser.add_argument("--inventory-only", action="store_true")
-        parser.add_argument("--domain", choices=["english", "japanese", "aws_saa"])
+        parser.add_argument("--domain")
         parser.add_argument("--item-id", type=int)
         parser.add_argument("--limit", type=int, default=20)
         parser.add_argument("--max-attempts", type=int, default=MAX_ATTEMPTS)
@@ -88,6 +89,7 @@ class Command(BaseCommand):
         item_id = options["item_id"]
         limit = options["limit"]
         max_attempts = options["max_attempts"]
+        domain = options["domain"]
         if options["dry_run"] and options["publish"]:
             raise CommandError("--dry-run과 --publish는 함께 사용할 수 없습니다.")
         if item_id is not None and item_id <= 0:
@@ -96,6 +98,11 @@ class Command(BaseCommand):
             raise CommandError(f"--limit는 1~{MAX_BATCH_SIZE}이어야 합니다.")
         if max_attempts < 1 or max_attempts > MAX_ATTEMPTS:
             raise CommandError(f"--max-attempts는 1~{MAX_ATTEMPTS}이어야 합니다.")
+        if domain and not QuizDomainConfig.objects.filter(
+            slug=domain,
+            enabled=True,
+        ).exists():
+            raise CommandError("--domain은 활성 퀴즈 도메인이어야 합니다.")
         try:
             timeout = int(os.getenv("LLM_TIMEOUT", "180"))
         except ValueError as error:
@@ -120,7 +127,7 @@ class Command(BaseCommand):
                 timeout=timeout,
                 dry_run=not options["publish"],
                 inventory_only=options["inventory_only"],
-                domain=options["domain"],
+                domain=domain,
                 item_id=item_id,
                 limit=limit,
                 max_attempts=max_attempts,

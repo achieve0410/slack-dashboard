@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { KnowledgeDetail, KnowledgeNavigationResponse, RunDetail, RunState, UserResponse } from '~/types/api'
+import type { KnowledgeDetail, KnowledgeNavigationResponse, KnowledgeVerification, RunDetail, RunState, UserResponse } from '~/types/api'
 import {
   affectsKnowledgeMembership,
   canEditRunConsumptionState,
@@ -135,6 +135,13 @@ function handleTagsUpdated(tags: string[]) {
   knowledgeUpdates.value = { ...knowledgeUpdates.value, [updated.id]: updated }
 }
 
+function handleVerificationUpdated(verification: KnowledgeVerification) {
+  if (!run.value?.knowledge_item) return
+  const updated = { ...run.value.knowledge_item, verification }
+  run.value.knowledge_item = updated
+  knowledgeUpdates.value = { ...knowledgeUpdates.value, [updated.id]: updated }
+}
+
 async function deleteRun() {
   if (!run.value || !window.confirm('Cron 실행 원본은 유지됩니다. 이 콘텐츠를 대시보드에서 삭제할까요?')) return
   deleting.value = true
@@ -222,6 +229,13 @@ watch(() => route.params.id, load, { immediate: true })
         </section>
 
         <aside class="detail-sidebar" aria-label="콘텐츠 작업 도구">
+          <KnowledgeVerificationPanel
+            v-if="run.knowledge_item"
+            :item-id="run.knowledge_item.id"
+            :verification="run.knowledge_item.verification"
+            @updated="handleVerificationUpdated"
+          />
+
           <KnowledgeTagsPanel
             v-if="run.knowledge_item"
             :item-id="run.knowledge_item.id"

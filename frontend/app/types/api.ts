@@ -106,8 +106,63 @@ export interface CronJob {
   last_error: string
   last_run_at: string | null
   next_run_at: string | null
+  sync_cursor_ts: string
+  last_import_count: number
+  disconnected_at: string | null
   thread_ts: string
   model_name: string
+}
+
+export interface VerificationSummary {
+  verified: number
+  stale: number
+  unverified: number
+}
+
+export interface LLMUsageSummary {
+  day_start: string
+  used: {
+    api_calls: number
+    total_tokens: number
+    estimated_cost_usd: number | string
+  }
+  limits: {
+    api_calls: number
+    total_tokens: number
+    estimated_cost_usd: number | string
+  }
+  blocked: boolean
+  configuration_error: string
+}
+
+export interface DataPolicySummary {
+  retention_days: number
+  retention_enabled: boolean
+  latest_backup: {
+    filename: string
+    created_at: string
+  } | null
+}
+
+export interface OnboardingStep {
+  key: 'connect' | 'sync' | 'classify' | 'verify' | 'ask' | 'quiz'
+  label: string
+  complete: boolean
+  href: string
+}
+
+export interface OnboardingStatus {
+  empty: boolean
+  demo_loaded: boolean
+  completed_steps: number
+  total_steps: number
+  steps: OnboardingStep[]
+  configuration: {
+    slack_token_set: boolean
+    slack_channels_set: boolean
+    llm_provider: string
+    llm_key_set: boolean
+  }
 }
 
 export interface Summary {
@@ -121,6 +176,7 @@ export interface Summary {
     needs_review: number
     scheduled_today: number
   }
+  verification: VerificationSummary
   categories: Array<{
     category: string
     label: string
@@ -133,6 +189,9 @@ export interface Summary {
   latest_knowledge: KnowledgeCard[]
   operations: OperationSummary
   backlog: OperationBacklog
+  llm_usage: LLMUsageSummary
+  data_policy: DataPolicySummary
+  onboarding: OnboardingStatus
 }
 
 export interface KnowledgeCategory {
@@ -149,6 +208,21 @@ export interface CategoryNode extends KnowledgeCategory {
 }
 
 export type KnowledgeStatus = 'awaiting_answer' | 'pending' | 'classified' | 'needs_review'
+export type KnowledgeVerificationStatus = 'unverified' | 'verified' | 'stale'
+
+export interface KnowledgeVerification {
+  status: KnowledgeVerificationStatus
+  status_label: string
+  owner: KnowledgeReviewer | null
+  verified_at: string | null
+  review_due_at: string | null
+  note: string
+  feedback_counts: {
+    helpful: number
+    incorrect: number
+    outdated: number
+  }
+}
 
 export interface KnowledgeCard {
   id: number
@@ -169,6 +243,7 @@ export interface KnowledgeCard {
   question_excerpt?: string
   has_answer?: boolean
   tags: string[]
+  verification: KnowledgeVerification
 }
 
 export interface KnowledgeListResponse {
@@ -315,6 +390,8 @@ export interface OperationBacklog {
 export interface OperationsResponse {
   operations: OperationSummary
   backlog: OperationBacklog
+  llm_usage: LLMUsageSummary
+  data_policy: DataPolicySummary
   results: OperationRun[]
 }
 
@@ -354,6 +431,7 @@ export interface KnowledgeDetail {
   slack?: KnowledgeSlackSource
   content_run_id?: number
   tags: string[]
+  verification: KnowledgeVerification
 }
 
 export interface KnowledgeTagsUpdateRequest {
@@ -365,7 +443,7 @@ export interface KnowledgeTagsUpdateResponse {
   tags: string[]
 }
 
-export type QuizDomain = 'english' | 'japanese' | 'aws_saa'
+export type QuizDomain = string
 export type QuizDifficulty = 'beginner' | 'intermediate' | 'advanced'
 export type QuizMode = 'new' | 'review' | 'wrong'
 export type QuizQuestionType = 'single_choice' | 'multiple_select'
@@ -373,12 +451,21 @@ export type QuizSessionStatus = 'active' | 'completed'
 
 export interface QuizCatalogResponse {
   domains: QuizDomain[]
+  domain_configs: QuizDomainConfig[]
   difficulty_levels: QuizDifficulty[]
   question_types: QuizQuestionType[]
   available_counts: Record<string, number>
   allowlist_version: string
   published_at: string | null
   empty_state: boolean
+}
+
+export interface QuizDomainConfig {
+  slug: QuizDomain
+  label: string
+  category_path: string
+  question_types: QuizQuestionType[]
+  requires_allowlist: boolean
 }
 
 export interface QuizChoice {
@@ -554,4 +641,29 @@ export interface QuizReviewResponse {
 export interface QuizWrongNoteResponse {
   question_id: number
   progress: QuizProgress
+}
+
+export interface KnowledgeAskSource {
+  knowledge_item_id: number | null
+  title: string
+  excerpt: string
+  source_url: string
+  detail_url: string
+}
+
+export interface KnowledgeAsk {
+  id: number
+  question: string
+  answer: string
+  insufficient_evidence: boolean
+  provider: string
+  model: string
+  feedback: '' | 'helpful' | 'unhelpful'
+  feedback_note: string
+  created_at: string
+  sources: KnowledgeAskSource[]
+}
+
+export interface KnowledgeAskHistory {
+  results: KnowledgeAsk[]
 }

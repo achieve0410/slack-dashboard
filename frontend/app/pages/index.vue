@@ -33,6 +33,7 @@ definePageMeta({ keepalive: true })
 const route = useRoute()
 const router = useRouter()
 const { request } = useApi()
+const { intlLocale } = useDashboardLocale()
 const summary = ref<Summary | null>(null)
 const jobs = ref<CronJob[]>([])
 const categories = ref<CategoryNode[]>([])
@@ -62,6 +63,8 @@ const savingSavedView = ref(false)
 const knowledgeReload = useState<number>('knowledge-reload', () => 0)
 const operationsData = ref<OperationsResponse | null>(null)
 const operationsError = ref('')
+const demoLoading = ref(false)
+const demoError = ref('')
 const operationKinds: OperationKind[] = ['sync', 'tagging', 'classify']
 const operationLabels: Record<OperationRunKind, string> = { sync: '동기화', tagging: '태깅', classify: '분류', quiz: '퀴즈' }
 const activeViewEyebrows = {
@@ -75,6 +78,7 @@ const routeReady = ref(false)
 const filterInput = ref('')
 const filterDraft = reactive({
   status: 'all',
+  verification: 'all',
   sourceType: 'all',
   read: 'all',
   bookmarked: false,
@@ -165,6 +169,7 @@ watch(
   () => route.fullPath,
   () => {
     filterDraft.status = statusFilter.value
+    filterDraft.verification = queryValue(route.query.verification) || 'all'
     filterDraft.sourceType = queryValue(route.query.source_type) || 'all'
     filterDraft.read = queryValue(route.query.read) || 'all'
     filterDraft.bookmarked = queryValue(route.query.bookmarked) === '1'
@@ -212,7 +217,10 @@ const secondLevelCategories = computed(() => activeRoot.value?.children || [])
 const thirdLevelCategories = computed(() => activeSecondLevel.value?.children || [])
 const libraryHeading = computed(() => selectedCategory.value?.path || '전체 지식')
 const attentionTotal = computed(() => summary.value
-  ? summary.value.knowledge.awaiting_answer + summary.value.knowledge.pending + summary.value.knowledge.needs_review
+  ? summary.value.knowledge.awaiting_answer
+    + summary.value.knowledge.pending
+    + summary.value.knowledge.needs_review
+    + summary.value.verification.stale
   : 0)
 
 function localDateKey(date = new Date()): string {
@@ -226,7 +234,7 @@ const todayCronJobs = computed(() => jobs.value.filter((job) => {
   if (!job.next_run_at) return false
   return localDateKey(new Date(job.next_run_at)) === localDateKey()
 }))
-const dashboardDate = computed(() => new Intl.DateTimeFormat('ko-KR', {
+const dashboardDate = computed(() => new Intl.DateTimeFormat(intlLocale.value, {
   month: 'long',
   day: 'numeric',
   weekday: 'long',
@@ -236,7 +244,7 @@ function formattedEventTime(event: ScheduleEvent): string {
   if (!event.starts_at) return '기한 없음'
   if (event.item_type === 'todo') return '할 일'
   if (event.all_day) return '종일'
-  return new Intl.DateTimeFormat('ko-KR', {
+  return new Intl.DateTimeFormat(intlLocale.value, {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(event.starts_at))
@@ -249,7 +257,7 @@ function eventDescription(event: ScheduleEvent): string {
 }
 
 function compactDate(value: string): string {
-  return new Intl.DateTimeFormat('ko-KR', {
+  return new Intl.DateTimeFormat(intlLocale.value, {
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',
@@ -391,6 +399,7 @@ async function applyFilters() {
     if (selectedCategoryId.value) query.category = String(selectedCategoryId.value)
     else query.view = 'library'
     if (filterDraft.status !== 'all') query.status = filterDraft.status
+    if (filterDraft.verification !== 'all') query.verification = filterDraft.verification
     if (filterDraft.sourceType !== 'all') query.source_type = filterDraft.sourceType
     if (filterDraft.read !== 'all') query.read = filterDraft.read
     if (filterDraft.bookmarked) query.bookmarked = '1'
@@ -429,6 +438,32 @@ async function clearTagFilter() {
 async function changeSort(value: Event) {
   const target = value.target as HTMLSelectElement
   await router.push({ query: { ...route.query, sort: target.value } })
+}
+
+async function updateDemoData(purge = false) {
+  if (demoLoading.value) return
+  if (purge && !window.confirm('예시 지식·퀴즈·일정만 삭제할까요?')) return
+  demoLoading.value = true
+  demoError.value = ''
+  try {
+    await request('/api/onboarding/', { method: purge ? 'DELETE' : 'POST' })
+    await refreshActiveView()
+  }
+  catch (reason) {
+    demoError.value = apiErrorMessage(reason, '예시 데이터를 변경하지 못했습니다.')
+  }
+  finally {
+    demoLoading.value = false
+  }
+}
+
+function budgetValue(used: number | string, limit: number | string, suffix = ''): string {
+  const normalizedLimit = Number(limit)
+  return `${Number(used).toLocaleString()}${suffix} / ${normalizedLimit > 0 ? `${normalizedLimit.toLocaleString()}${suffix}` : 'unlimited'}`
+}
+
+function moneyValue(value: number | string): string {
+  return `$${Number(value).toFixed(4)}`
 }
 
 function savedViewPayload() {
@@ -658,6 +693,39 @@ onBeforeRouteLeave((to) => {
     </div>
 
     <template v-if="activeView === 'dashboard'">
+      <section
+        v-if="summary && summary.onboarding.completed_steps < summary.onboarding.total_steps"
+        class="dashboard-widget onboarding-panel"
+        aria-labelledby="onboarding-title"
+      >
+        <header class="widget-header">
+          <div><span>GETTING STARTED</span><h2 id="onboarding-title">첫 지식 흐름 완성하기</h2></div>
+          <b>{{ summary.onboarding.completed_steps }} / {{ summary.onboarding.total_steps }}</b>
+        </header>
+        <p>Slack 연결부터 근거 있는 답변과 퀴즈까지 한 단계씩 확인할 수 있습니다.</p>
+        <ol class="onboarding-steps">
+          <li v-for="step in summary.onboarding.steps" :key="step.key" :class="{ complete: step.complete }">
+            <span aria-hidden="true">{{ step.complete ? '✓' : '○' }}</span>
+            <NuxtLink :to="step.href" :external="step.href.startsWith('/admin/')">{{ step.label }}</NuxtLink>
+          </li>
+        </ol>
+        <div class="onboarding-config">
+          <span :class="{ complete: summary.onboarding.configuration.slack_token_set }">Slack token</span>
+          <span :class="{ complete: summary.onboarding.configuration.slack_channels_set }">Slack channels</span>
+          <span :class="{ complete: summary.onboarding.configuration.llm_key_set }">LLM · {{ summary.onboarding.configuration.llm_provider }}</span>
+        </div>
+        <p v-if="demoError" class="inline-error" role="alert">{{ demoError }}</p>
+        <footer>
+          <button v-if="!summary.onboarding.demo_loaded" class="action-button primary" type="button" :disabled="demoLoading" @click="updateDemoData()">
+            {{ demoLoading ? '준비 중…' : '예시 데이터로 둘러보기' }}
+          </button>
+          <button v-else class="ghost-button" type="button" :disabled="demoLoading" @click="updateDemoData(true)">
+            {{ demoLoading ? '정리 중…' : '예시 데이터 제거' }}
+          </button>
+          <code>python backend/manage.py seed_demo_data</code>
+        </footer>
+      </section>
+
       <section class="dashboard-kpis" aria-label="오늘 핵심 지표" :aria-busy="baseLoading || scheduleLoading">
         <NuxtLink to="/?view=library&period=today" class="kpi-widget">
           <div class="kpi-icon green" aria-hidden="true">▤</div>
@@ -724,6 +792,7 @@ onBeforeRouteLeave((to) => {
               <div><dt><span class="status-bullet blue" />답변 대기</dt><dd>{{ summary.knowledge.awaiting_answer }}</dd></div>
               <div><dt><span class="status-bullet amber" />분류 대기</dt><dd>{{ summary.knowledge.pending }}</dd></div>
               <div><dt><span class="status-bullet red" />검토 필요</dt><dd>{{ summary.knowledge.needs_review }}</dd></div>
+              <div><dt><span class="status-bullet red" />지식 재검토</dt><dd>{{ summary.verification.stale }}</dd></div>
             </dl>
             <div v-else class="widget-loading" role="status">확인할 항목을 불러오는 중입니다.</div>
             <div v-if="summary?.recent_failures.length" class="compact-failures">
@@ -752,6 +821,7 @@ onBeforeRouteLeave((to) => {
           <header class="widget-header"><div><span>SHORTCUTS</span><h2>바로가기</h2></div></header>
           <nav class="quicklink-grid" aria-label="대시보드 바로가기">
             <NuxtLink to="/?view=library"><span>▤</span><b>지식 탐색</b><small>카테고리별 보기</small></NuxtLink>
+            <NuxtLink to="/ask"><span>⌕</span><b>지식에게 질문</b><small>출처 기반 답변</small></NuxtLink>
             <NuxtLink to="/?view=free-question"><span>?</span><b>질문 확인</b><small>대기 인박스</small></NuxtLink>
             <NuxtLink to="/schedule"><span>□</span><b>일정 등록</b><small>오늘 할 일</small></NuxtLink>
             <NuxtLink to="/?view=operations"><span>◉</span><b>운영 상태</b><small>Cron 모니터링</small></NuxtLink>
@@ -796,6 +866,7 @@ onBeforeRouteLeave((to) => {
       <form class="board-tools library-tools" role="search" @submit.prevent="applyFilters">
         <label><span>현재 범위 검색</span><input v-model="filterInput" type="search" maxlength="200" :placeholder="`${libraryHeading}에서 검색`"></label>
         <label><span>분류 상태</span><select v-model="filterDraft.status"><option value="all">전체 상태</option><option value="classified">분류 완료</option><option value="pending">분류 대기</option><option value="awaiting_answer">답변 대기</option><option value="needs_review">검토 필요</option></select></label>
+        <label><span>검증 상태</span><select v-model="filterDraft.verification"><option value="all">전체 검증 상태</option><option value="verified">검증됨</option><option value="unverified">미검증</option><option value="stale">재검토 필요</option></select></label>
         <label><span>출처</span><select v-model="filterDraft.sourceType"><option value="all">모든 출처</option><option value="cron">Cron</option><option value="slack_qa">Slack 질문</option></select></label>
         <label><span>읽음 상태</span><select v-model="filterDraft.read"><option value="all">읽음 전체</option><option value="unread">읽지 않음</option><option value="read">읽음</option></select></label>
         <label><span>보관 상태</span><select v-model="filterDraft.archived"><option value="exclude">보관 제외</option><option value="include">보관 포함</option><option value="only">보관만</option></select></label>
@@ -835,12 +906,41 @@ onBeforeRouteLeave((to) => {
       <p v-if="operationsError" class="notice error-notice" role="alert">{{ operationsError }}</p>
       <template v-if="operationsData">
         <div class="operations-overview"><div><span>분류 대기</span><strong>{{ operationsData.backlog.pending }}</strong></div><div><span>검토 필요</span><strong>{{ operationsData.backlog.review }}</strong></div><div :class="{ warning: operationsData.backlog.total > 0 }"><span>전체 backlog</span><strong>{{ operationsData.backlog.total }}</strong></div></div>
+        <div class="operations-policy-grid">
+          <article :class="['freshness-card', { stale: operationsData.llm_usage.blocked }]">
+            <header><div><p class="eyebrow">LLM BUDGET</p><h2>오늘 사용량</h2></div><span>{{ operationsData.llm_usage.configuration_error ? '설정 오류' : operationsData.llm_usage.blocked ? '한도 도달' : '사용 가능' }}</span></header>
+            <dl>
+              <div><dt>API 호출</dt><dd>{{ budgetValue(operationsData.llm_usage.used.api_calls, operationsData.llm_usage.limits.api_calls) }}</dd></div>
+              <div><dt>토큰</dt><dd>{{ budgetValue(operationsData.llm_usage.used.total_tokens, operationsData.llm_usage.limits.total_tokens) }}</dd></div>
+              <div><dt>예상 비용</dt><dd>{{ moneyValue(operationsData.llm_usage.used.estimated_cost_usd) }} / {{ Number(operationsData.llm_usage.limits.estimated_cost_usd) > 0 ? moneyValue(operationsData.llm_usage.limits.estimated_cost_usd) : 'unlimited' }}</dd></div>
+              <div v-if="operationsData.llm_usage.configuration_error"><dt>설정</dt><dd><code>{{ operationsData.llm_usage.configuration_error }}</code></dd></div>
+            </dl>
+          </article>
+          <article :class="['freshness-card', { stale: !operationsData.data_policy.latest_backup }]">
+            <header><div><p class="eyebrow">DATA POLICY</p><h2>보존·백업</h2></div><span>{{ operationsData.data_policy.retention_enabled ? `${operationsData.data_policy.retention_days}일` : '수동 보존' }}</span></header>
+            <dl>
+              <div><dt>보존 정책</dt><dd>{{ operationsData.data_policy.retention_enabled ? `${operationsData.data_policy.retention_days}일 이후 정리` : '자동 정리 꺼짐' }}</dd></div>
+              <div><dt>최근 백업</dt><dd>{{ operationsData.data_policy.latest_backup?.filename || '백업 없음' }}</dd></div>
+              <div><dt>백업 명령</dt><dd><code>backup_dashboard</code></dd></div>
+            </dl>
+          </article>
+        </div>
         <div class="freshness-grid">
           <article v-for="kind in operationKinds" :key="kind" :class="['freshness-card', { stale: operationsData.operations[kind].stale }]">
             <header><div><p class="eyebrow">{{ kind.toUpperCase() }}</p><h2>{{ operationLabels[kind] }}</h2></div><span>{{ operationsData.operations[kind].stale ? '신선도 지연' : '신선도 정상' }}</span></header>
             <dl><div><dt>주기</dt><dd>{{ operationsData.operations[kind].schedule_label }}</dd></div><div><dt>최근 성공</dt><dd>{{ operationsData.operations[kind].last_success_at ? compactDate(operationsData.operations[kind].last_success_at) : '성공 기록 없음' }}</dd></div><div><dt>최근 시도</dt><dd>{{ operationsData.operations[kind].last_attempt ? compactDate(operationsData.operations[kind].last_attempt.started_at) : '시도 기록 없음' }}</dd></div><div><dt>상태</dt><dd>{{ operationStatusLabel(operationsData.operations[kind].last_attempt?.status) }}</dd></div></dl>
           </article>
         </div>
+        <section class="content-view source-health-panel" aria-labelledby="source-health-title">
+          <div class="panel-heading"><div><p class="eyebrow">SOURCE CHECKPOINTS</p><h2 id="source-health-title">Slack 증분 동기화</h2></div><span>{{ jobs.filter(job => job.external_id.startsWith('channel:')).length }}개</span></div>
+          <div v-if="jobs.some(job => job.external_id.startsWith('channel:'))" class="source-health-list">
+            <article v-for="job in jobs.filter(item => item.external_id.startsWith('channel:'))" :key="job.id">
+              <div><strong>{{ job.name }}</strong><small>{{ job.enabled ? '연결됨' : '연결 해제' }} · 최근 {{ job.last_import_count }}건</small></div>
+              <code>{{ job.sync_cursor_ts || '첫 동기화 전' }}</code>
+            </article>
+          </div>
+          <p v-else class="panel-empty">연결된 Slack 지식 채널이 없습니다.</p>
+        </section>
         <div class="jobs-table-wrap" role="region" tabindex="0" aria-label="동기화, 태깅, 분류 실행 기록 표, 가로로 스크롤할 수 있습니다"><table class="jobs-table"><caption class="visually-hidden">동기화·태깅·분류 최근 실행 기록</caption><thead><tr><th>작업</th><th>상태</th><th>시작</th><th>종료</th><th>요약</th><th>오류 코드</th></tr></thead><tbody><tr v-for="run in operationsData.results" :key="run.id"><td>{{ operationLabels[run.kind] }}</td><td><span :class="['status-dot', run.status]">{{ operationStatusLabel(run.status) }}</span></td><td>{{ compactDate(run.started_at) }}</td><td>{{ run.finished_at ? compactDate(run.finished_at) : '실행 중' }}</td><td>{{ operationSummaryText(run.summary) }}</td><td><code>{{ run.error_code || '—' }}</code></td></tr></tbody></table></div>
       </template>
       <div v-else-if="!operationsError" class="notice" role="status">운영 상태를 불러오는 중입니다.</div>

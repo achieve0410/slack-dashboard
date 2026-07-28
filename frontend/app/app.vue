@@ -10,6 +10,7 @@ const sidebarOpen = ref(false)
 const sidebarCollapsed = ref(false)
 const isMobileSidebar = ref(false)
 const { request } = useApi()
+const { applyLocale, initializeLocale, locale, t } = useDashboardLocale()
 const undoToken = useState<string>('bulk-undo-token', () => '')
 const knowledgeReload = useState<number>('knowledge-reload', () => 0)
 const undoError = ref('')
@@ -27,6 +28,7 @@ watch(() => route.fullPath, () => {
 })
 
 onMounted(() => {
+  initializeLocale()
   sidebarCollapsed.value = localStorage.getItem('dashboard:sidebar-collapsed') === '1'
   mobileSidebarQuery = window.matchMedia('(max-width: 900px)')
   isMobileSidebar.value = mobileSidebarQuery.matches
@@ -58,6 +60,7 @@ function toggleSidebar() {
 }
 
 const activeSection = computed(() => {
+  if (route.path === '/ask') return 'ask'
   if (route.path.startsWith('/quiz')) return 'quiz'
   if (route.path === '/schedule') return 'schedule'
   if (route.path === '/trash') return 'trash'
@@ -73,16 +76,17 @@ const activeSection = computed(() => {
 })
 
 const pageTitle = computed(() => ({
-  dashboard: '대시보드',
-  library: '지식 라이브러리',
-  'free-question': '자유 질문',
-  operations: 'Cron 운영 상태',
-  quiz: '퀴즈',
-  schedule: '일정 관리',
-  trash: '휴지통',
-  'api-tokens': 'API 토큰 관리',
-  'api-guide': 'API 가이드',
-  search: '통합 검색',
+  dashboard: t('dashboard'),
+  library: t('library'),
+  'free-question': t('freeQuestion'),
+  ask: t('ask'),
+  operations: t('operations'),
+  quiz: t('quiz'),
+  schedule: t('schedule'),
+  trash: t('trash'),
+  'api-tokens': t('apiTokens'),
+  'api-guide': t('apiGuide'),
+  search: t('search'),
 }[activeSection.value] || 'Slack Dashboard'))
 
 async function submitGlobalSearch() {
@@ -132,40 +136,45 @@ async function logout() {
 
       <nav class="sidebar-nav">
         <p>WORKSPACE</p>
-        <NuxtLink to="/" title="대시보드" :class="{ active: activeSection === 'dashboard' }"><span aria-hidden="true">⌂</span><b>대시보드</b></NuxtLink>
-        <NuxtLink to="/?view=library" title="지식 라이브러리" :class="{ active: activeSection === 'library' }"><span aria-hidden="true">▤</span><b>지식 라이브러리</b></NuxtLink>
-        <NuxtLink to="/?view=free-question" title="자유 질문" :class="{ active: activeSection === 'free-question' }"><span aria-hidden="true">?</span><b>자유 질문</b></NuxtLink>
-        <NuxtLink to="/quiz" title="퀴즈" :class="{ active: activeSection === 'quiz' }"><span aria-hidden="true">✓</span><b>퀴즈</b></NuxtLink>
-        <NuxtLink to="/schedule" title="일정 관리" :class="{ active: activeSection === 'schedule' }"><span aria-hidden="true">□</span><b>일정 관리</b></NuxtLink>
-        <NuxtLink to="/trash" title="휴지통" :class="{ active: activeSection === 'trash' }"><span aria-hidden="true">♲</span><b>휴지통</b></NuxtLink>
+        <NuxtLink to="/" title="대시보드" :class="{ active: activeSection === 'dashboard' }"><span aria-hidden="true">⌂</span><b>{{ t('dashboard') }}</b></NuxtLink>
+        <NuxtLink to="/?view=library" title="지식 라이브러리" :class="{ active: activeSection === 'library' }"><span aria-hidden="true">▤</span><b>{{ t('library') }}</b></NuxtLink>
+        <NuxtLink to="/?view=free-question" title="자유 질문" :class="{ active: activeSection === 'free-question' }"><span aria-hidden="true">?</span><b>{{ t('freeQuestion') }}</b></NuxtLink>
+        <NuxtLink to="/ask" title="지식에게 질문" :class="{ active: activeSection === 'ask' }"><span aria-hidden="true">⌕</span><b>{{ t('ask') }}</b></NuxtLink>
+        <NuxtLink to="/quiz" title="퀴즈" :class="{ active: activeSection === 'quiz' }"><span aria-hidden="true">✓</span><b>{{ t('quiz') }}</b></NuxtLink>
+        <NuxtLink to="/schedule" title="일정 관리" :class="{ active: activeSection === 'schedule' }"><span aria-hidden="true">□</span><b>{{ t('schedule') }}</b></NuxtLink>
+        <NuxtLink to="/trash" title="휴지통" :class="{ active: activeSection === 'trash' }"><span aria-hidden="true">♲</span><b>{{ t('trash') }}</b></NuxtLink>
 
         <p>OPERATIONS</p>
-        <NuxtLink to="/?view=operations" title="Cron 실행 상태" :class="{ active: activeSection === 'operations' }"><span aria-hidden="true">◉</span><b>Cron 실행 상태</b></NuxtLink>
-        <NuxtLink to="/api-tokens" title="API 토큰 관리" :class="{ active: activeSection === 'api-tokens' }"><span aria-hidden="true">◇</span><b>토큰 관리</b></NuxtLink>
-        <NuxtLink to="/api-guide" title="API 가이드" :class="{ active: activeSection === 'api-guide' }"><span aria-hidden="true">≡</span><b>API 가이드</b></NuxtLink>
+        <NuxtLink to="/?view=operations" title="Cron 실행 상태" :class="{ active: activeSection === 'operations' }"><span aria-hidden="true">◉</span><b>{{ t('operations') }}</b></NuxtLink>
+        <NuxtLink to="/api-tokens" title="API 토큰 관리" :class="{ active: activeSection === 'api-tokens' }"><span aria-hidden="true">◇</span><b>{{ t('apiTokens') }}</b></NuxtLink>
+        <NuxtLink to="/api-guide" title="API 가이드" :class="{ active: activeSection === 'api-guide' }"><span aria-hidden="true">≡</span><b>{{ t('apiGuide') }}</b></NuxtLink>
       </nav>
 
       <div class="sidebar-footer">
         <div class="private-status"><span class="live-indicator" aria-hidden="true" /><span><b>Local workspace</b><small>Session-authenticated</small></span></div>
-        <button class="sidebar-logout" type="button" :disabled="loggingOut" title="로그아웃" @click="logout"><span aria-hidden="true">↪</span><b>{{ loggingOut ? '로그아웃 중' : '로그아웃' }}</b></button>
+        <button class="sidebar-logout" type="button" :disabled="loggingOut" title="로그아웃" @click="logout"><span aria-hidden="true">↪</span><b>{{ loggingOut ? t('loggingOut') : t('logout') }}</b></button>
         <small>Slack Dashboard</small>
       </div>
     </aside>
-    <button v-if="sidebarOpen" class="sidebar-scrim" type="button" aria-label="메뉴 닫기" @click="closeSidebar" />
+    <button v-if="sidebarOpen" class="sidebar-scrim" type="button" :aria-label="t('menuClose')" @click="closeSidebar" />
 
     <div class="workspace-shell">
       <header class="workspace-topbar">
         <div class="topbar-title">
           <NuxtLink to="/" class="mobile-home-mark" aria-label="Slack Dashboard 홈">S</NuxtLink>
-          <button ref="menuToggle" class="menu-toggle" type="button" aria-label="메뉴 열기" aria-controls="primary-sidebar" :aria-expanded="sidebarOpen" @click="openSidebar">☰</button>
+          <button ref="menuToggle" class="menu-toggle" type="button" :aria-label="t('menuOpen')" aria-controls="primary-sidebar" :aria-expanded="sidebarOpen" @click="openSidebar">☰</button>
           <div><span>Slack Dashboard</span><strong>{{ pageTitle }}</strong></div>
         </div>
         <form class="header-search" role="search" @submit.prevent="submitGlobalSearch">
-          <label class="visually-hidden" for="global-search">전체 지식 검색</label>
+          <label class="visually-hidden" for="global-search">{{ t('searchPlaceholder') }}</label>
           <span aria-hidden="true">⌕</span>
-          <input id="global-search" v-model="headerQuery" type="search" maxlength="200" placeholder="전체 지식 검색">
-          <button type="submit" :disabled="!headerQuery.trim()">검색</button>
+          <input id="global-search" v-model="headerQuery" type="search" maxlength="200" :placeholder="t('searchPlaceholder')">
+          <button type="submit" :disabled="!headerQuery.trim()">{{ t('searchAction') }}</button>
         </form>
+        <div class="locale-switch" role="group" aria-label="Language">
+          <button type="button" :class="{ active: locale === 'ko' }" :aria-pressed="locale === 'ko'" @click="applyLocale('ko')">KO</button>
+          <button type="button" :class="{ active: locale === 'en' }" :aria-pressed="locale === 'en'" @click="applyLocale('en')">EN</button>
+        </div>
       </header>
       <main>
         <NuxtPage />

@@ -60,7 +60,14 @@ class FakeSlackClient:
         self.messages = messages
         self.channel_name = channel_name
 
-    def conversations_history(self, channel, limit=200, cursor=None):
+    def conversations_history(
+        self,
+        channel,
+        limit=200,
+        cursor=None,
+        oldest=None,
+        inclusive=None,
+    ):
         return {"messages": self.messages}
 
     def conversations_info(self, channel):

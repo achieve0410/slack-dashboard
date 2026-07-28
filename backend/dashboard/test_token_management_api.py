@@ -139,3 +139,23 @@ class TokenManagementApiTests(TestCase):
         self.assertEqual(allowed.status_code, 201)
         self.assertEqual(invalid_scope.status_code, 400)
         self.assertEqual(invalid_scope.json()["code"], "invalid_scopes")
+        self.assertEqual(
+            invalid_scope.json()["error"],
+            "지원하지 않는 권한 범위입니다: root:all",
+        )
+
+    def test_invalid_json_returns_only_the_public_validation_message(self):
+        response = self.client.post(
+            "/api/platform-tokens/",
+            data='{"agent_key":',
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json(),
+            {
+                "code": "invalid_request",
+                "error": "올바른 JSON 요청이 아닙니다.",
+            },
+        )

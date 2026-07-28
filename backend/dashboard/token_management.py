@@ -28,6 +28,14 @@ AVAILABLE_SCOPES = (
 )
 
 
+class TokenRequestError(ValueError):
+    def __init__(self, code: str, message: str, *, status: int = 400):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status = status
+
+
 def error(code: str, message: str, *, status: int = 400) -> JsonResponse:
     return JsonResponse({"code": code, "error": message}, status=status)
 
@@ -35,10 +43,16 @@ def error(code: str, message: str, *, status: int = 400) -> JsonResponse:
 def parse_json(request: HttpRequest) -> dict:
     try:
         value = json.loads(request.body or b"{}")
-    except json.JSONDecodeError as exc:
-        raise ValueError("올바른 JSON 요청이 아닙니다.") from exc
+    except json.JSONDecodeError:
+        raise TokenRequestError(
+            "invalid_request",
+            "올바른 JSON 요청이 아닙니다.",
+        ) from None
     if not isinstance(value, dict):
-        raise ValueError("요청 본문은 JSON 객체여야 합니다.")
+        raise TokenRequestError(
+            "invalid_request",
+            "요청 본문은 JSON 객체여야 합니다.",
+        )
     return value
 
 
@@ -108,30 +122,46 @@ def validate_issue_data(data: dict, *, require_agent: bool) -> tuple[PlatformAge
     allowed = {"agent_key", "scopes", "expires_days"} if require_agent else {"scopes", "expires_days"}
     unknown = sorted(set(data) - allowed)
     if unknown:
-        raise ValueError(f"지원하지 않는 필드입니다: {', '.join(unknown)}")
+        raise TokenRequestError(
+            "invalid_request",
+            f"지원하지 않는 필드입니다: {', '.join(unknown)}",
+        )
 
     agent = None
     if require_agent:
         agent_key = data.get("agent_key")
         if not isinstance(agent_key, str) or not agent_key:
-            raise ValueError("agent_key가 필요합니다.")
+            raise TokenRequestError("invalid_request", "agent_key가 필요합니다.")
         agent = PlatformAgent.objects.filter(key=agent_key, is_active=True).first()
         if not agent:
-            raise LookupError("활성 에이전트를 찾을 수 없습니다.")
+            raise TokenRequestError(
+                "agent_not_found",
+                "활성 에이전트를 찾을 수 없습니다.",
+                status=404,
+            )
 
     scopes = data.get("scopes")
     if not isinstance(scopes, list) or not scopes or not all(isinstance(scope, str) for scope in scopes):
-        raise ValueError("scopes는 하나 이상의 문자열 목록이어야 합니다.")
+        raise TokenRequestError(
+            "invalid_request",
+            "scopes는 하나 이상의 문자열 목록이어야 합니다.",
+        )
     normalized_scopes = sorted(set(scopes))
     invalid_scopes = sorted(set(normalized_scopes) - set(AVAILABLE_SCOPES))
     if invalid_scopes:
-        raise PermissionError(", ".join(invalid_scopes))
+        raise TokenRequestError(
+            "invalid_scopes",
+            f"지원하지 않는 권한 범위입니다: {', '.join(invalid_scopes)}",
+        )
 
     expires_days = data.get("expires_days")
     if expires_days is None:
         expires_at = None
     elif isinstance(expires_days, bool) or not isinstance(expires_days, int) or not 1 <= expires_days <= 3650:
-        raise ValueError("expires_days는 1~3650 사이의 정수이거나 null이어야 합니다.")
+        raise TokenRequestError(
+            "invalid_request",
+            "expires_days는 1~3650 사이의 정수이거나 null이어야 합니다.",
+        )
     else:
         expires_at = timezone.now() + timedelta(days=expires_days)
     return agent, normalized_scopes, expires_at
@@ -180,12 +210,8 @@ def platform_tokens(request: HttpRequest) -> JsonResponse:
     try:
         data = parse_json(request)
         agent, scopes, expires_at = validate_issue_data(data, require_agent=True)
-    except PermissionError as exc:
-        return error("invalid_scopes", f"지원하지 않는 권한 범위입니다: {exc}")
-    except LookupError as exc:
-        return error("agent_not_found", str(exc), status=404)
-    except ValueError as exc:
-        return error("invalid_request", str(exc))
+    except TokenRequestError as exc:
+        return error(exc.code, exc.message, status=exc.status)
 
     record, raw_token = issue_token(
         agent=agent,
@@ -212,10 +238,8 @@ def rotate_platform_token(request: HttpRequest, token_id: int) -> JsonResponse:
     try:
         data = parse_json(request)
         _, scopes, expires_at = validate_issue_data(data, require_agent=False)
-    except PermissionError as exc:
-        return error("invalid_scopes", f"지원하지 않는 권한 범위입니다: {exc}")
-    except ValueError as exc:
-        return error("invalid_request", str(exc))
+    except TokenRequestError as exc:
+        return error(exc.code, exc.message, status=exc.status)
 
     record, raw_token = issue_token(
         agent=current.agent,
@@ -241,8 +265,8 @@ def revoke_platform_token(request: HttpRequest, token_id: int) -> JsonResponse:
     )
     try:
         data = parse_json(request)
-    except ValueError as exc:
-        return error("invalid_request", str(exc))
+    except TokenRequestError as exc:
+        return error(exc.code, exc.message, status=exc.status)
     if data:
         return error("invalid_request", "폐기 요청 본문은 비어 있어야 합니다.")
 

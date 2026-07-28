@@ -71,6 +71,18 @@ from .schedule_sync import infer_todo_category, reclassify_automatic_todos
 
 logger = logging.getLogger(__name__)
 
+INVALID_JSON_MESSAGE = "올바른 JSON 요청이 아닙니다."
+
+
+class InvalidJsonError(ValueError):
+    pass
+
+
+class ScheduleInputError(ValueError):
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
 
 def session_key(request: HttpRequest, *, create: bool = False) -> str:
     if create and not request.session.session_key:
@@ -81,8 +93,15 @@ def session_key(request: HttpRequest, *, create: bool = False) -> str:
 def parse_json(request: HttpRequest) -> dict:
     try:
         return json.loads(request.body or b"{}")
-    except json.JSONDecodeError as exc:
-        raise ValueError("올바른 JSON 요청이 아닙니다.") from exc
+    except json.JSONDecodeError:
+        raise InvalidJsonError from None
+
+
+def invalid_json_response(*, code: str | None = None) -> JsonResponse:
+    payload = {"error": INVALID_JSON_MESSAGE}
+    if code:
+        payload["code"] = code
+    return JsonResponse(payload, status=400)
 
 
 CONSUMPTION_BOOLEAN_FIELDS = {
@@ -398,7 +417,7 @@ def knowledge_base_queryset():
 
 def knowledge_filter_error(error: KnowledgeFilterError) -> JsonResponse:
     return JsonResponse(
-        {"error": str(error), "code": error.code},
+        {"error": error.message, "code": error.code},
         status=error.status,
     )
 
@@ -509,7 +528,7 @@ def event_datetime(value: object, field: str):
         return None
     parsed = parse_datetime(str(value))
     if not parsed:
-        raise ValueError(f"{field}은 올바른 ISO 날짜·시각이어야 합니다.")
+        raise ScheduleInputError(f"{field}은 올바른 ISO 날짜·시각이어야 합니다.")
     if timezone.is_naive(parsed):
         parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
     return parsed
@@ -519,7 +538,7 @@ def update_schedule_event(event: ScheduleEvent, data: dict) -> None:
     if "item_type" in data:
         item_type = str(data["item_type"])
         if item_type not in ScheduleEvent.ItemType.values:
-            raise ValueError("item_type은 schedule 또는 todo여야 합니다.")
+            raise ScheduleInputError("item_type은 schedule 또는 todo여야 합니다.")
         event.item_type = item_type
     if "title" in data:
         event.title = str(data["title"])[:200]
@@ -532,7 +551,7 @@ def update_schedule_event(event: ScheduleEvent, data: dict) -> None:
     for field in ("all_day", "completed"):
         if field in data:
             if not isinstance(data[field], bool):
-                raise ValueError(f"{field}은 true 또는 false여야 합니다.")
+                raise ScheduleInputError(f"{field}은 true 또는 false여야 합니다.")
             setattr(event, field, data[field])
     if event.item_type == ScheduleEvent.ItemType.TODO:
         if "todo_category_id" in data:
@@ -543,8 +562,10 @@ def update_schedule_event(event: ScheduleEvent, data: dict) -> None:
             else:
                 try:
                     event.todo_category = ScheduleCategory.objects.get(pk=int(category_id))
-                except (TypeError, ValueError, ScheduleCategory.DoesNotExist) as error:
-                    raise ValueError("할 일 카테고리를 찾을 수 없습니다.") from error
+                except (TypeError, ValueError, ScheduleCategory.DoesNotExist):
+                    raise ScheduleInputError(
+                        "할 일 카테고리를 찾을 수 없습니다."
+                    ) from None
                 event.todo_category_manual = True
         elif not event.todo_category_manual:
             event.todo_category = infer_todo_category(event.title)
@@ -552,7 +573,9 @@ def update_schedule_event(event: ScheduleEvent, data: dict) -> None:
             event.all_day = False
     else:
         if data.get("todo_category_id") not in (None, ""):
-            raise ValueError("일정에는 할 일 카테고리를 지정할 수 없습니다.")
+            raise ScheduleInputError(
+                "일정에는 할 일 카테고리를 지정할 수 없습니다."
+            )
         event.todo_category = None
         event.todo_category_manual = False
     event.full_clean()
@@ -750,8 +773,8 @@ def quiz_sessions(request: HttpRequest) -> JsonResponse:
     try:
         data = parse_json(request)
         _session, payload = create_session(data)
-    except ValueError as error:
-        return JsonResponse({"error": str(error), "code": "invalid_json"}, status=400)
+    except InvalidJsonError:
+        return invalid_json_response(code="invalid_json")
     except QuizApiError as error:
         return quiz_error(error)
     return JsonResponse(payload, status=201)
@@ -770,8 +793,8 @@ def quiz_session_answer(request: HttpRequest, session_id, item_id: int) -> JsonR
     try:
         data = parse_json(request)
         return JsonResponse(answer_item(session_id, item_id, data))
-    except ValueError as error:
-        return JsonResponse({"error": str(error), "code": "invalid_json"}, status=400)
+    except InvalidJsonError:
+        return invalid_json_response(code="invalid_json")
     except QuizApiError as error:
         return quiz_error(error)
 
@@ -797,8 +820,8 @@ def quiz_wrong_note(request: HttpRequest, question_id: int) -> JsonResponse:
     try:
         data = parse_json(request)
         return JsonResponse(update_manual_wrong_note(question_id, data))
-    except ValueError as error:
-        return JsonResponse({"error": str(error), "code": "invalid_json"}, status=400)
+    except InvalidJsonError:
+        return invalid_json_response(code="invalid_json")
     except QuizApiError as error:
         return quiz_error(error)
 
@@ -973,8 +996,8 @@ def saved_knowledge_views(request: HttpRequest) -> JsonResponse:
 
     try:
         data = parse_json(request)
-    except ValueError as error:
-        return JsonResponse({"error": str(error)}, status=400)
+    except InvalidJsonError:
+        return invalid_json_response()
     if not isinstance(data, dict):
         return JsonResponse({"error": "요청 본문은 JSON 객체여야 합니다."}, status=400)
     unknown = set(data) - {"name", "filters", "sort", "is_default"}
@@ -1033,8 +1056,8 @@ def saved_knowledge_view_detail(
 
     try:
         data = parse_json(request)
-    except ValueError as error:
-        return JsonResponse({"error": str(error)}, status=400)
+    except InvalidJsonError:
+        return invalid_json_response()
     if not isinstance(data, dict) or not data:
         return JsonResponse({"error": "변경할 필드를 입력해주세요."}, status=400)
     unknown = set(data) - {"name", "filters", "sort", "is_default"}
@@ -1261,8 +1284,8 @@ def bulk_ineligible_count(item_ids: list[int], action: str, parameters: dict) ->
 def knowledge_bulk_preview(request: HttpRequest) -> JsonResponse:
     try:
         data = parse_json(request)
-    except ValueError as error:
-        return JsonResponse({"error": str(error)}, status=400)
+    except InvalidJsonError:
+        return invalid_json_response()
     if not isinstance(data, dict):
         return JsonResponse({"error": "요청 본문은 JSON 객체여야 합니다."}, status=400)
     unknown = set(data) - {"ids", "filter", "action", "parameters"}
@@ -1339,8 +1362,8 @@ def knowledge_bulk_preview(request: HttpRequest) -> JsonResponse:
 def knowledge_bulk_execute(request: HttpRequest) -> JsonResponse:
     try:
         data = parse_json(request)
-    except ValueError as error:
-        return JsonResponse({"error": str(error)}, status=400)
+    except InvalidJsonError:
+        return invalid_json_response()
     if not isinstance(data, dict):
         return JsonResponse({"error": "요청 본문은 JSON 객체여야 합니다."}, status=400)
     unknown = set(data) - {"token", "action", "parameters", "review_note"}
@@ -1382,8 +1405,8 @@ def knowledge_bulk_execute(request: HttpRequest) -> JsonResponse:
 def knowledge_bulk_undo(request: HttpRequest) -> JsonResponse:
     try:
         data = parse_json(request)
-    except ValueError as error:
-        return JsonResponse({"error": str(error)}, status=400)
+    except InvalidJsonError:
+        return invalid_json_response()
     if not isinstance(data, dict) or set(data) != {"token"}:
         return JsonResponse(
             {"error": "token만 지정해야 합니다.", "code": "invalid_token"},
@@ -1467,8 +1490,8 @@ def knowledge_tags(request: HttpRequest, item_id: int) -> JsonResponse:
         return JsonResponse({"error": "인증이 필요합니다.", "code": "auth_required"}, status=403)
     try:
         data = parse_json(request)
-    except ValueError as error:
-        return JsonResponse({"error": str(error)}, status=400)
+    except InvalidJsonError:
+        return invalid_json_response()
     if not isinstance(data, dict) or set(data) != {"tags"}:
         return JsonResponse({"error": "tags 필드만 지정할 수 있습니다."}, status=400)
     try:
@@ -1495,8 +1518,8 @@ def knowledge_state(request: HttpRequest, item_id: int) -> JsonResponse:
         return JsonResponse(state_payload(state_for_item(item)))
     try:
         data = parse_json(request)
-    except ValueError as error:
-        return JsonResponse({"error": str(error)}, status=400)
+    except InvalidJsonError:
+        return invalid_json_response()
     validation_error = validate_consumption_patch(data)
     if validation_error:
         return JsonResponse({"error": validation_error}, status=400)
@@ -1621,8 +1644,12 @@ def schedule(request: HttpRequest) -> JsonResponse:
         event = ScheduleEvent()
         update_schedule_event(event, data)
         event.save()
-    except (ValueError, ValidationError) as exc:
-        return JsonResponse({"error": str(exc)}, status=400)
+    except InvalidJsonError:
+        return invalid_json_response()
+    except ScheduleInputError as error:
+        return JsonResponse({"error": error.message}, status=400)
+    except ValidationError as error:
+        return JsonResponse({"error": "; ".join(error.messages)}, status=400)
     return JsonResponse(schedule_payload(event), status=201)
 
 
@@ -1652,8 +1679,12 @@ def schedule_detail(request: HttpRequest, event_id: int) -> JsonResponse | HttpR
             )
         update_schedule_event(event, data)
         event.save()
-    except (ValueError, ValidationError) as exc:
-        return JsonResponse({"error": str(exc)}, status=400)
+    except InvalidJsonError:
+        return invalid_json_response()
+    except ScheduleInputError as error:
+        return JsonResponse({"error": error.message}, status=400)
+    except ValidationError as error:
+        return JsonResponse({"error": "; ".join(error.messages)}, status=400)
     return JsonResponse(schedule_payload(event))
 
 
@@ -1670,8 +1701,10 @@ def schedule_categories(request: HttpRequest) -> JsonResponse:
         update_schedule_category(category, data)
         category.save()
         reclassify_automatic_todos()
-    except (ValueError, ValidationError) as error:
-        return JsonResponse({"error": str(error)}, status=400)
+    except InvalidJsonError:
+        return invalid_json_response()
+    except ValidationError as error:
+        return JsonResponse({"error": "; ".join(error.messages)}, status=400)
     return JsonResponse(schedule_category_payload(category), status=201)
 
 
@@ -1697,8 +1730,10 @@ def schedule_category_detail(
         update_schedule_category(category, data)
         category.save()
         reclassify_automatic_todos()
-    except (ValueError, ValidationError) as error:
-        return JsonResponse({"error": str(error)}, status=400)
+    except InvalidJsonError:
+        return invalid_json_response()
+    except ValidationError as error:
+        return JsonResponse({"error": "; ".join(error.messages)}, status=400)
     return JsonResponse(schedule_category_payload(category))
 
 
@@ -1766,8 +1801,8 @@ def run_state(request: HttpRequest, run_id: int) -> JsonResponse:
         return JsonResponse({"error": "지식 항목을 찾을 수 없습니다."}, status=404)
     try:
         data = parse_json(request)
-    except ValueError as error:
-        return JsonResponse({"error": str(error)}, status=400)
+    except InvalidJsonError:
+        return invalid_json_response()
     validation_error = validate_consumption_patch(data)
     if validation_error:
         return JsonResponse({"error": validation_error}, status=400)
@@ -1779,8 +1814,8 @@ def run_responses(request: HttpRequest, run_id: int) -> JsonResponse:
     run = get_object_or_404(ContentRun, pk=run_id, hidden_at__isnull=True)
     try:
         data = parse_json(request)
-    except ValueError as exc:
-        return JsonResponse({"error": str(exc)}, status=400)
+    except InvalidJsonError:
+        return invalid_json_response()
     answer = str(data.get("answer", "")).strip()
     if not answer:
         return JsonResponse({"error": "답변을 입력해주세요."}, status=400)

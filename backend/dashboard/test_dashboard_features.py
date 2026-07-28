@@ -79,6 +79,20 @@ class ScheduleApiTests(TestCase):
         self.assertEqual(empty_title.status_code, 400)
         self.assertEqual(ScheduleEvent.objects.count(), 0)
 
+    def test_schedule_invalid_json_returns_only_the_public_validation_message(self):
+        response = self.client.post(
+            "/api/schedule/",
+            data='{"title":',
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=self.csrf_token(),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json(),
+            {"error": "올바른 JSON 요청이 아닙니다."},
+        )
+
     def test_slack_schedule_allows_only_completion_updates(self):
         event = ScheduleEvent.objects.create(
             title="Slack 일정",

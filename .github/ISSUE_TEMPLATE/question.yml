@@ -1,0 +1,38 @@
+name: Usage question
+description: Ask for help configuring or operating Slack Dashboard
+title: "[Question] "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include tokens, private Slack content, or vulnerability details. Use the private security-reporting link for security issues.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked the README, docs, and existing issues.
+          required: true
+        - label: I removed secrets and private workspace data.
+          required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+      description: Describe the desired outcome and where you are blocked.
+    validations:
+      required: true
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What have you tried?
+      description: Include relevant commands, configuration names, and sanitized errors.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the project revision, OS, Python/Node versions, database, and deployment method when relevant.

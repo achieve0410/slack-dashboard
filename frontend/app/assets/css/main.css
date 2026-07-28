@@ -1,5 +1,3 @@
-@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
-
 :root {
   --ink: #1d2922;
   --muted: #5f6b63;
@@ -17,7 +15,7 @@
   --warning-soft: #f3ead4;
   --blue-gray: #526c82;
   --shadow: 0 8px 24px rgba(43, 52, 46, 0.08);
-  --font-sans: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --text-xs: 11px;
   --text-sm: 12px;
   --text-md: 14px;
@@ -3316,4 +3314,3 @@ body { background: #eef1ef; }
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   white-space: pre;
 }
-

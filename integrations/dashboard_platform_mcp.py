@@ -5,7 +5,7 @@ import ssl
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -19,14 +19,38 @@ class DashboardApiClient:
         ca_cert: str | None = None,
         timeout: int = 60,
     ):
-        if not base_url.startswith("https://"):
-            raise ValueError("DASHBOARD_API_URL은 https:// 주소여야 합니다.")
-        if not token:
+        parsed_url = urlsplit(base_url)
+        if not parsed_url.hostname or parsed_url.username or parsed_url.password:
+            raise ValueError(
+                "DASHBOARD_API_URL must be an absolute URL without credentials."
+            )
+        if parsed_url.query or parsed_url.fragment:
+            raise ValueError(
+                "DASHBOARD_API_URL must not include a query string or fragment."
+            )
+        if parsed_url.scheme == "http":
+            if parsed_url.hostname not in {"localhost", "127.0.0.1", "::1"}:
+                raise ValueError(
+                    "DASHBOARD_API_URL must use HTTPS unless it targets a loopback host."
+                )
+            if ca_cert:
+                raise ValueError("DASHBOARD_API_CA_CERT is only valid with HTTPS.")
+        elif parsed_url.scheme != "https":
+            raise ValueError(
+                "DASHBOARD_API_URL must use HTTPS unless it targets a loopback host."
+            )
+        if not token.strip():
             raise ValueError("Dashboard API token is required.")
+        if timeout <= 0:
+            raise ValueError("DASHBOARD_API_TIMEOUT must be greater than zero.")
         self.base_url = base_url.rstrip("/")
-        self.token = token
+        self.token = token.strip()
         self.timeout = timeout
-        self.ssl_context = ssl.create_default_context(cafile=ca_cert or None)
+        self.ssl_context = (
+            ssl.create_default_context(cafile=ca_cert or None)
+            if parsed_url.scheme == "https"
+            else None
+        )
 
     @classmethod
     def from_environment(cls) -> "DashboardApiClient":
@@ -69,7 +93,10 @@ class DashboardApiClient:
             headers["Idempotency-Key"] = idempotency_key or str(uuid4())
         request = Request(url, data=encoded, headers=headers, method=method.upper())
         try:
-            with urlopen(request, timeout=self.timeout, context=self.ssl_context) as response:
+            open_options: dict[str, Any] = {"timeout": self.timeout}
+            if self.ssl_context is not None:
+                open_options["context"] = self.ssl_context
+            with urlopen(request, **open_options) as response:
                 return json.loads(response.read().decode("utf-8"))
         except HTTPError as error:
             try:

@@ -74,7 +74,7 @@ For automation, prefer the MCP server (`integrations/dashboard_platform_mcp.py`)
 Every `POST` requires an `Idempotency-Key` of at most 128 characters.
 
 ```http
-Idempotency-Key: 2a625fbe-fb04-49ae-8ed0-8820444f2be3
+Idempotency-Key: example-request-0001
 ```
 
 - Repeating the same token + path + key + body replays the original response.

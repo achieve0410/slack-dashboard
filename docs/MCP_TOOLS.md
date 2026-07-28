@@ -24,6 +24,8 @@ So the MCP server inherits the exact same Bearer-token scopes, state transitions
 
 Transport is local `stdio` — your agent CLI runs the Python MCP process directly, and that process calls the HTTP(S) API above. There is no separately exposed MCP network port.
 
+Plain HTTP is accepted only for the loopback hosts `localhost`, `127.0.0.1`, and `::1`. Every other API address must use HTTPS. URL-embedded credentials, query strings, and fragments are rejected.
+
 Files involved (paths relative to wherever you cloned this repo):
 
 ```text
@@ -37,9 +39,13 @@ Token files       wherever you choose to store them, e.g. ~/.dashboard/tokens/*.
 Check all of these before registering the MCP server:
 
 ```bash
+python3 -m venv /path/to/slack-dashboard/venv
+/path/to/slack-dashboard/venv/bin/python -m pip install \
+  -r /path/to/slack-dashboard/requirements-mcp-lock.txt
+
 curl --fail --silent --show-error http://localhost:8000/api/health/
 
-test -x "$(command -v python3)"
+test -x /path/to/slack-dashboard/venv/bin/python
 test -f /path/to/slack-dashboard/integrations/dashboard_platform_mcp.py
 test -f "$HOME/.dashboard/tokens/default.token"
 ```
@@ -97,7 +103,7 @@ codex mcp add dashboard_platform \
   --env DASHBOARD_API_URL=http://localhost:8000/api/v1 \
   --env DASHBOARD_API_TOKEN_FILE="$HOME/.dashboard/tokens/default.token" \
   --env DASHBOARD_API_TIMEOUT=60 \
-  -- python3 \
+  -- /path/to/slack-dashboard/venv/bin/python \
   /path/to/slack-dashboard/integrations/dashboard_platform_mcp.py
 ```
 
@@ -306,7 +312,7 @@ Clients without resource-reading support should use the `read_mcp_guide` tool in
 | Symptom | Cause | Fix |
 |---|---|---|
 | MCP server missing from the list | client not registered, or an existing session predates registration | register, then start a new agent session |
-| Exits immediately after starting | wrong Python, server file, or env var path | check the files in section 3, then re-register with absolute paths |
+| Exits immediately after starting | MCP dependency missing, wrong Python, server file, or env var path | install `requirements-mcp-lock.txt`, check section 3, then re-register with absolute paths |
 | "cannot connect to the Dashboard API" | service down, wrong URL, or CA mismatch | check `/api/health/`, `DASHBOARD_API_URL`, `DASHBOARD_API_CA_CERT` |
 | `401 invalid_token` | file mismatch, expired, rotated, or revoked | check status on `/api-tokens`, then point at the correct file |
 | `403 insufficient_scope` | the tool needs a scope this token lacks | swap in a token with the right scope, or delegate to an admin |

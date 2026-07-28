@@ -50,6 +50,22 @@ class DashboardAccessControlTests(TestCase):
             fetch_redirect_response=False,
         )
 
+    @override_settings(
+        TEMPLATES=[
+            {
+                "BACKEND": "django.template.backends.django.DjangoTemplates",
+                "APP_DIRS": False,
+                "OPTIONS": {
+                    "loaders": [
+                        (
+                            "django.template.loaders.locmem.Loader",
+                            {"frontend/index.html": "<!doctype html><title>Dashboard</title>"},
+                        )
+                    ]
+                },
+            }
+        ]
+    )
     def test_authenticated_session_can_open_frontend_and_legacy_api(self):
         self.client.force_login(self.user)
 

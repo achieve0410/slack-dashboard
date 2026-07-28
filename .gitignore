@@ -6,7 +6,8 @@ venv/
 *.egg-info/
 
 # Django
-backend/staticfiles/
+backend/staticfiles/*
+!backend/staticfiles/.gitkeep
 backend/frontend_static/
 backend/templates/frontend/
 backend/run/*

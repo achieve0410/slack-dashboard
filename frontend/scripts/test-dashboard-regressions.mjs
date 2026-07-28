@@ -23,8 +23,8 @@ const [
 
 assert.match(cssSource, /\.widget-agenda > div \{[^}]*grid-template-columns: 64px minmax\(0, 1fr\) auto;/)
 assert.match(cssSource, /\.widget-agenda > div > span \{ min-width: 0; \}/)
-assert.match(cssSource, /@import url\('https:\/\/cdn\.jsdelivr\.net\/gh\/orioncactus\/pretendard/)
-assert.match(cssSource, /--font-sans: 'Pretendard'/)
+assert.doesNotMatch(cssSource, /@import\s+url\(['"]https?:\/\//)
+assert.match(cssSource, /--font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;/)
 
 assert.match(appSource, /:aria-hidden="isMobileSidebar && !sidebarOpen \? 'true' : undefined"/)
 assert.match(appSource, /:inert="isMobileSidebar && !sidebarOpen"/)

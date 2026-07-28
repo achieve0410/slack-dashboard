@@ -1,4 +1,4 @@
-# Slack Dashboard
+# Slack Knowledge Dashboard
 
 A self-hosted knowledge dashboard that imports content from Slack channels, classifies it with an LLM, and gives you a searchable library, a quiz generator, a schedule/TODO tracker, and an API other agents can use.
 
@@ -6,7 +6,7 @@ Built with Django (backend/API) and Nuxt (frontend SPA).
 
 ## Features
 
-- **Slack ingestion** — imports messages from Slack channels you configure into a knowledge base. Supports a free-question channel (mention the bot, get an answer back in-thread) and a schedule channel (parse `2026-07-20 14:00~15:00 | title | notes` style messages into a calendar).
+- **Slack ingestion** — imports messages from Slack channels you configure into a knowledge base. An optional free-question view imports question threads and existing bot replies; it does not post answers to Slack. A schedule channel parses `2026-07-20 14:00~15:00 | title | notes` style messages into a calendar.
 - **LLM classification** — an Anthropic or OpenAI model classifies each imported item into a category tree it builds up over time, with confidence thresholds and a manual-review fallback.
 - **Knowledge library** — browse, search, tag, bookmark, and archive everything that's been imported and classified.
 - **Quiz generation** — generates multiple-choice/multi-select quiz questions from knowledge items classified under three built-in domains (English, Japanese, AWS certification study — see [Limitations](#limitations)), with spaced-repetition review.
@@ -39,14 +39,14 @@ Everything runs as one Django process (`gunicorn` in production, `runserver` in 
 Requirements: Python ≥3.12, Node ≥22.11.
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/achieve0410/slack-dashboard.git
 cd slack-dashboard
 
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt        # add mysqlclient via requirements-mysql.txt if you want MySQL
+python -m pip install -r requirements-lock.txt
 
-cd frontend && npm install && cd ..
+cd frontend && npm ci && cd ..
 
 cp .env.example .env
 # edit .env: at minimum set SLACK_BOT_TOKEN, SLACK_KNOWLEDGE_CHANNELS, and an LLM API key
@@ -64,6 +64,8 @@ Open `http://localhost:3000`, log in with the superuser you created, and you'll 
 ```bash
 python backend/manage.py sync_slack
 ```
+
+Use `requirements-mysql.txt` in addition to the core lock file only when running MySQL. Source dependency ranges live in `requirements.txt`; normal installations should use the reproducible lock file.
 
 ### Slack app setup
 
@@ -109,6 +111,16 @@ python backend/manage.py generate_quiz_questions --publish  # generate quiz ques
 30 3 * * *   /path/to/slack-dashboard/backend/deploy/run-classify.sh --limit 50 >> /path/to/slack-dashboard/backend/run/classify.log 2>&1
 ```
 
+### Optional MCP server
+
+Install the MCP dependency lock in the same virtual environment:
+
+```bash
+python -m pip install -r requirements-mcp-lock.txt
+```
+
+The MCP server runs over local stdio and calls the Platform API. Plain HTTP is accepted only for `localhost`, `127.0.0.1`, and `::1`; use HTTPS for every non-loopback address. See [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md) for token issuance, registration, tools, and troubleshooting.
+
 ## Production notes
 
 1. Build the frontend once and let Django/WhiteNoise serve it:
@@ -119,7 +131,7 @@ python backend/manage.py generate_quiz_questions --publish  # generate quiz ques
 2. Set `DJANGO_DEBUG=0`, a real `DJANGO_SECRET_KEY` (the app refuses to start without one when debug is off), and `DJANGO_ALLOWED_HOSTS`/`DJANGO_CSRF_TRUSTED_ORIGINS` for your domain.
 3. Run `python -m gunicorn --config backend/deploy/gunicorn.conf.py config.wsgi:application` (or `backend/deploy/run-gunicorn.sh`), bound to `127.0.0.1:8000` by default (override with `GUNICORN_BIND`).
 4. Put a reverse proxy in front of it for TLS. `backend/deploy/nginx.conf.example` is a minimal starting point if you use nginx — any reverse proxy works.
-5. For MySQL instead of SQLite: `pip install -r requirements-mysql.txt`, `db/script.sh start` (spins up MySQL via Docker Compose, generates credentials into `db/slack_dashboard_db/.env`), then set `DJANGO_DB_ENGINE=mysql` plus the `DJANGO_DB_*` variables in `.env`.
+5. For MySQL instead of SQLite: `python -m pip install -r requirements-mysql.txt`, `db/script.sh start` (spins up MySQL via Docker Compose, generates credentials into `db/slack_dashboard_db/.env`), then set `DJANGO_DB_ENGINE=mysql` plus the `DJANGO_DB_*` variables in `.env`.
 
 ## Security posture
 
@@ -128,6 +140,10 @@ python backend/manage.py generate_quiz_questions --publish  # generate quiz ques
 - This is a single-operator tool: there's no multi-tenant user model. Don't expose it to untrusted users.
 - No rate limiting or cost caps on the LLM-calling endpoints — if you expose classification/tagging/quiz generation to anyone but yourself, add your own.
 
+## Privacy and data handling
+
+Slack content is stored by the self-hosted instance. Classification, tagging, and quiz generation send the content needed for those operations to the configured Anthropic or OpenAI API. The project does not include analytics or telemetry. Operators remain responsible for workspace authorization, notices, retention, deletion, and provider terms. Read [PRIVACY.md](PRIVACY.md) before importing real workspace content.
+
 ## Limitations
 
 - The UI is Korean-only (this wasn't translated for the initial public release).
@@ -135,6 +151,12 @@ python backend/manage.py generate_quiz_questions --publish  # generate quiz ques
 - `sync_slack` re-fetches full channel history on every run; there's no incremental/`--oldest` mode yet, so very high-volume channels will be slow to sync.
 - Single-operator design — no per-user data isolation.
 
+## Contributing and support
+
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before opening a pull request. Use the issue forms for bugs and feature requests, [SUPPORT.md](SUPPORT.md) for support expectations, and [SECURITY.md](SECURITY.md) for private vulnerability reporting.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+Slack is a trademark of Slack Technologies, LLC. This independent project is not affiliated with, endorsed by, or sponsored by Slack Technologies, Anthropic, or OpenAI.

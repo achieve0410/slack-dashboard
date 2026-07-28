@@ -25,7 +25,7 @@
     "typescript": "5.9.3",
     "vue-tsc": "3.2.5",
     "@types/node": "22.20.1",
-    "cac": "6.7.14",
+    "cac": "7.0.0",
     "commander": "15.0.0"
   },
   "overrides": {

@@ -1,8 +1,14 @@
 # Slack Knowledge Dashboard
 
-A self-hosted knowledge dashboard that imports content from Slack channels, classifies it with an LLM, and gives you a searchable library, a quiz generator, a schedule/TODO tracker, and an API other agents can use.
+Turn useful conversations buried in Slack into a private, searchable knowledge workspace — then reuse them as quizzes, schedules, TODOs, and agent-readable APIs.
 
 Built with Django (backend/API) and Nuxt (frontend SPA).
+
+![Slack Knowledge Dashboard overview](docs/images/dashboard-overview.jpg)
+
+[Quickstart](#quickstart) · [Features](#features) · [Product tour](#product-tour) · [API guide](docs/API_GUIDE.md) · [MCP tools](docs/MCP_TOOLS.md)
+
+> The screenshots use generated sample data. No real Slack workspace content is included.
 
 ## Features
 
@@ -12,6 +18,20 @@ Built with Django (backend/API) and Nuxt (frontend SPA).
 - **Quiz generation** — generates multiple-choice/multi-select quiz questions from knowledge items classified under three built-in domains (English, Japanese, AWS certification study — see [Limitations](#limitations)), with spaced-repetition review.
 - **Schedule / TODO** — a calendar view backed by both the web UI and a Slack channel, with keyword-based auto-categorization.
 - **Platform API** (`/api/v1/*`) — a scoped, Bearer-token-authenticated API plus an MCP server (`integrations/dashboard_platform_mcp.py`) so other agents/tools can read the knowledge base and create tasks/artifacts/approvals. See [docs/API_GUIDE.md](docs/API_GUIDE.md) and [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
+
+## Product tour
+
+### Search and curate Slack knowledge
+
+Browse classified content and unanswered questions together, then narrow the library by category, status, source, date, tags, or saved views.
+
+![Knowledge library with sample Slack content](docs/images/knowledge-library.jpg)
+
+### Turn Slack messages into an agenda
+
+Create schedules and TODOs in the web UI or sync them from a dedicated Slack channel, with overdue grouping and keyword-based TODO categories.
+
+![Schedule and TODO management with sample data](docs/images/schedule-todo.jpg)
 
 ## Architecture
 

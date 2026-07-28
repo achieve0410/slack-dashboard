@@ -1,8 +1,14 @@
 # Slack Knowledge Dashboard
 
-A self-hosted knowledge dashboard that imports content from Slack channels, classifies it with an LLM, and gives you a searchable library, a quiz generator, a schedule/TODO tracker, and an API other agents can use.
+Turn useful Slack conversations into a private knowledge operations workspace — search and verify what your team knows, ask cited questions, generate quizzes, and manage schedules and TODOs.
 
 Built with Django (backend/API) and Nuxt (frontend SPA).
+
+![Slack Knowledge Dashboard overview with onboarding, knowledge signals, and today's work](docs/images/dashboard-overview.png)
+
+[Quickstart](#quickstart) · [Features](#features) · [Product tour](#product-tour) · [API guide](docs/API_GUIDE.md) · [MCP tools](docs/MCP_TOOLS.md)
+
+> Screenshots use generated sample data from `seed_demo_data`. No real Slack workspace content is included.
 
 ## Features
 
@@ -14,6 +20,20 @@ Built with Django (backend/API) and Nuxt (frontend SPA).
 - **Schedule / TODO** — a calendar view backed by both the web UI and a Slack channel, with keyword-based auto-categorization.
 - **Operator controls** — guided demo onboarding, LLM usage guardrails, data-retention and backup commands, source disconnect/purge controls, and an opt-in Slack operational digest.
 - **Platform API** (`/api/v1/*`) — a scoped, Bearer-token-authenticated API plus an MCP server (`integrations/dashboard_platform_mcp.py`) so other agents/tools can read the knowledge base and create tasks/artifacts/approvals. See [docs/API_GUIDE.md](docs/API_GUIDE.md) and [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
+
+## Product tour
+
+### Find, verify, and reuse Slack knowledge
+
+Browse imported knowledge by category, source, status, verification state, and saved view. Verified source records can then support cited answers in the Ask workspace.
+
+![Knowledge library with generated Slack sample data and verification filters](docs/images/knowledge-library.png)
+
+### Turn Slack messages into an agenda
+
+Create schedules and TODOs in the web UI or sync them from a dedicated Slack channel, with overdue grouping and keyword-based TODO categories.
+
+![Schedule and TODO management with generated sample data](docs/images/schedule-todo.png)
 
 ## Architecture
 

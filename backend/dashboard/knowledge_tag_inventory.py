@@ -4,11 +4,12 @@ from dataclasses import dataclass
 from django.db import transaction
 from django.db.models import Q
 
-from .models import Category, KnowledgeItem, KnowledgeTagCorpusRevision
-from .quiz_inventory import AWS_PATH, ENGLISH_PATH, JAPANESE_PATH
-
-
-EXCLUDED_LEARNING_PATHS = (ENGLISH_PATH, JAPANESE_PATH, AWS_PATH)
+from .models import (
+    Category,
+    KnowledgeItem,
+    KnowledgeTagCorpusRevision,
+    QuizDomainConfig,
+)
 
 
 @dataclass(frozen=True)
@@ -61,7 +62,11 @@ def collect_locked_knowledge_tag_inventory(
 
 def _collect_inventory_items() -> tuple[KnowledgeTagInventoryItem, ...]:
     excluded_path_keys = {
-        Category.canonical_path_key(path) for path in EXCLUDED_LEARNING_PATHS
+        Category.canonical_path_key(path)
+        for path in QuizDomainConfig.objects.filter(enabled=True).values_list(
+            "category_path",
+            flat=True,
+        )
     }
     queryset = (
         KnowledgeItem.objects.select_related("category", "content_run")

@@ -22,6 +22,7 @@ urlpatterns = [
         name="platform-token-revoke",
     ),
     path("summary/", views.summary, name="summary"),
+    path("onboarding/", views.onboarding, name="onboarding"),
     path("jobs/", views.jobs, name="jobs"),
     path("operations/", views.operations, name="operations"),
     path("quiz/catalog/", views.quiz_catalog, name="quiz-catalog"),
@@ -49,6 +50,12 @@ urlpatterns = [
     ),
     path("categories/", views.categories, name="categories"),
     path("search/", views.search, name="search"),
+    path("ask/", views.knowledge_ask, name="knowledge-ask"),
+    path(
+        "ask/<int:ask_id>/feedback/",
+        views.knowledge_ask_feedback,
+        name="knowledge-ask-feedback",
+    ),
     path("knowledge/", views.knowledge, name="knowledge"),
     path(
         "saved-knowledge-views/",
@@ -101,6 +108,16 @@ urlpatterns = [
         "knowledge/<int:item_id>/state/",
         views.knowledge_state,
         name="knowledge-state",
+    ),
+    path(
+        "knowledge/<int:item_id>/verification/",
+        views.knowledge_verification,
+        name="knowledge-verification",
+    ),
+    path(
+        "knowledge/<int:item_id>/feedback/",
+        views.knowledge_feedback,
+        name="knowledge-feedback",
     ),
     path(
         "knowledge/<int:item_id>/classification/",

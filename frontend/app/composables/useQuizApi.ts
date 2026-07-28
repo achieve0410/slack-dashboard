@@ -3,6 +3,7 @@ import type {
   QuizCatalogResponse,
   QuizDifficulty,
   QuizDomain,
+  QuizDomainConfig,
   QuizMode,
   QuizResultResponse,
   QuizReviewResponse,
@@ -12,10 +13,16 @@ import type {
   QuizWrongNoteResponse,
 } from '~/types/api'
 
-export const quizDomainLabels: Record<QuizDomain, string> = {
+export const quizDomainLabels: Record<string, string> = {
   english: '영어',
   japanese: '일본어',
   aws_saa: 'AWS SAA',
+}
+
+export function quizDomainLabel(domain: QuizDomain, configs: QuizDomainConfig[] = []): string {
+  return configs.find(config => config.slug === domain)?.label
+    || quizDomainLabels[domain]
+    || domain.replaceAll('_', ' ')
 }
 
 export const quizDifficultyLabels: Record<QuizDifficulty, string> = {
@@ -36,9 +43,16 @@ export function quizAvailableKey(domain: QuizDomain, difficulty: QuizDifficulty)
 
 export function useQuizApi() {
   const { request } = useApi()
+  const domainConfigs = useState<QuizDomainConfig[]>('quiz-domain-configs', () => [])
 
-  function catalog() {
-    return request<QuizCatalogResponse>('/api/quiz/catalog/')
+  async function catalog() {
+    const response = await request<QuizCatalogResponse>('/api/quiz/catalog/')
+    domainConfigs.value = response.domain_configs
+    return response
+  }
+
+  function domainLabel(domain: QuizDomain) {
+    return quizDomainLabel(domain, domainConfigs.value)
   }
 
   function review(params: { domain?: QuizDomain, difficulty?: QuizDifficulty, dueOnly?: boolean } = {}) {
@@ -80,5 +94,16 @@ export function useQuizApi() {
     })
   }
 
-  return { answer, catalog, history, result, review, session, startSession, wrongNote }
+  return {
+    answer,
+    catalog,
+    domainConfigs,
+    domainLabel,
+    history,
+    result,
+    review,
+    session,
+    startSession,
+    wrongNote,
+  }
 }

@@ -10,6 +10,10 @@ const [
   tokenManagementSource,
   apiGuideSource,
   apiComposableSource,
+  askSource,
+  localeSource,
+  knowledgeCardSource,
+  verificationPanelSource,
 ] = await Promise.all([
   readFile(new URL('../app/app.vue', import.meta.url), 'utf8'),
   readFile(new URL('../app/assets/css/main.css', import.meta.url), 'utf8'),
@@ -19,6 +23,10 @@ const [
   readFile(new URL('../app/pages/api-tokens.vue', import.meta.url), 'utf8'),
   readFile(new URL('../app/pages/api-guide.vue', import.meta.url), 'utf8'),
   readFile(new URL('../app/composables/useApi.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../app/pages/ask.vue', import.meta.url), 'utf8'),
+  readFile(new URL('../app/composables/useDashboardLocale.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../app/components/KnowledgeCard.vue', import.meta.url), 'utf8'),
+  readFile(new URL('../app/components/KnowledgeVerificationPanel.vue', import.meta.url), 'utf8'),
 ])
 
 assert.match(cssSource, /\.widget-agenda > div \{[^}]*grid-template-columns: 64px minmax\(0, 1fr\) auto;/)
@@ -31,8 +39,13 @@ assert.match(appSource, /:inert="isMobileSidebar && !sidebarOpen"/)
 assert.match(appSource, /aria-controls="primary-sidebar"/)
 assert.match(appSource, /:aria-expanded="sidebarOpen"/)
 assert.match(appSource, /menuToggle\.value\?\.focus\(\)/)
-assert.match(appSource, /to="\/api-tokens"[\s\S]*?>토큰 관리</)
-assert.match(appSource, /to="\/api-guide"[\s\S]*?>API 가이드</)
+assert.match(appSource, /to="\/api-tokens"[\s\S]*?t\('apiTokens'\)/)
+assert.match(appSource, /to="\/api-guide"[\s\S]*?t\('apiGuide'\)/)
+assert.match(appSource, /to="\/ask"[\s\S]*?t\('ask'\)/)
+assert.match(appSource, /initializeLocale\(\)/)
+assert.match(appSource, /applyLocale\('en'\)/)
+assert.match(localeSource, /localStorage\.setItem\('dashboard:locale'/)
+assert.match(localeSource, /document\.documentElement\.lang = value/)
 assert.match(appSource, /request\('\/accounts\/logout\/', \{ method: 'POST' \}\)/)
 assert.match(apiComposableSource, /responseStatus\(reason\) === 401/)
 assert.match(apiComposableSource, /\/accounts\/login\/\?next=/)
@@ -62,6 +75,12 @@ assert.match(indexSource, /동기화, 태깅, 분류 실행 기록 표/)
 assert.match(indexSource, /class="dashboard-main-grid"/)
 assert.match(indexSource, /class="dashboard-action-rail"/)
 assert.match(indexSource, /class="dashboard-support-grid"/)
+assert.match(indexSource, /\/api\/onboarding\//)
+assert.match(indexSource, /class="dashboard-widget onboarding-panel"/)
+assert.match(indexSource, /operationsData\.llm_usage/)
+assert.match(indexSource, /operationsData\.data_policy/)
+assert.match(indexSource, /job\.sync_cursor_ts/)
+assert.match(indexSource, /v-model="filterDraft\.verification"/)
 assert.match(indexSource, /item\.tags\.slice\(0, 2\)/)
 assert.match(cssSource, /\.dashboard-kpis\s*\{[\s\S]*?border: 1px solid #dce2de;/)
 assert.match(cssSource, /\.kpi-widget\s*\{[\s\S]*?border-right: 1px solid #e3e8e5;/)
@@ -88,6 +107,19 @@ assert.match(knowledgeDetailSource, /class="detail-page knowledge-page"/)
 assert.match(knowledgeDetailSource, /<section v-if="showSummary"/)
 assert.match(knowledgeDetailSource, /<section v-if="showQuestion"/)
 assert.match(knowledgeDetailSource, /<MarkdownContent :content="item\.summary \|\| ''" \/>/)
+assert.match(verificationPanelSource, /\/verification\//)
+assert.match(verificationPanelSource, /\/feedback\//)
+assert.match(verificationPanelSource, /class="verification-actions"/)
+assert.match(knowledgeDetailSource, /<KnowledgeVerificationPanel/)
+assert.match(runDetailSource, /<KnowledgeVerificationPanel/)
+assert.match(knowledgeCardSource, /item\.verification\.status_label/)
+assert.match(askSource, /request<KnowledgeAsk>\('\/api\/ask\/'/)
+assert.match(askSource, /\/api\/ask\/\$\{result\.value\.id\}\/feedback\//)
+assert.match(askSource, /class="ask-citations"/)
+assert.match(askSource, /source\.detail_url/)
+assert.match(cssSource, /\.ask-workbench/)
+assert.match(cssSource, /\.onboarding-steps/)
+assert.match(cssSource, /\.verification-actions/)
 assert.doesNotMatch(knowledgeDetailSource, /class="qa-summary"/)
 assert.match(cssSource, /\/\* Knowledge detail responsive pass: xs\/sm\/md\/lg\/xl \*\//)
 assert.match(cssSource, /\.knowledge-page\s*\{[\s\S]*?width: min\(1240px, 100%\);[\s\S]*?\}/)

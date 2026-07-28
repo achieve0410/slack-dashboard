@@ -17,7 +17,7 @@ const filters = reactive<{ domain: QuizDomain, difficulty: QuizDifficulty, mode:
   mode: 'new',
 })
 
-const domains: QuizDomain[] = ['english', 'japanese', 'aws_saa']
+const domains = computed<QuizDomain[]>(() => catalog.value?.domains || [])
 const difficulties: QuizDifficulty[] = ['beginner', 'intermediate', 'advanced']
 const modes: QuizMode[] = ['new', 'review', 'wrong']
 
@@ -38,6 +38,9 @@ async function load() {
       quiz.history(20),
     ])
     catalog.value = catalogData
+    if (!catalogData.domains.includes(filters.domain) && catalogData.domains[0]) {
+      filters.domain = catalogData.domains[0]
+    }
     review.value = reviewData
     history.value = historyData.results
   }
@@ -59,7 +62,7 @@ async function start() {
   }
   catch (reason) {
     if (apiErrorCode(reason) === 'quiz_pool_shortage') {
-      startError.value = `${quizDomainLabels[filters.domain]} ${quizDifficultyLabels[filters.difficulty]} 문제는 현재 ${availableCount.value}개입니다. 10개 이상 생성된 뒤 시작할 수 있습니다.`
+      startError.value = `${quiz.domainLabel(filters.domain)} ${quizDifficultyLabels[filters.difficulty]} 문제는 현재 ${availableCount.value}개입니다. 10개 이상 생성된 뒤 시작할 수 있습니다.`
     }
     else {
       startError.value = apiErrorMessage(reason, '퀴즈 세션을 시작하지 못했습니다.')
@@ -87,7 +90,7 @@ function historyProgress(item: QuizSessionHistoryItem): string {
       <div>
         <p class="eyebrow">KNOWLEDGE QUIZ</p>
         <h1>지식 기반 퀴즈</h1>
-        <p>영어·일본어·AWS SAA 지식을 10문제 단위로 풀고 오답을 복습합니다.</p>
+        <p>관리자가 설정한 지식 분야를 10문제 단위로 풀고 오답을 복습합니다.</p>
       </div>
       <div class="quiz-header-actions">
         <NuxtLink class="ghost-button" to="/quiz/review">오답노트</NuxtLink>
@@ -135,7 +138,7 @@ function historyProgress(item: QuizSessionHistoryItem): string {
           <form v-else class="quiz-start-form" @submit.prevent="start">
             <fieldset>
               <legend>분야</legend>
-              <button v-for="domain in domains" :key="domain" type="button" :class="['filter-chip', { active: filters.domain === domain }]" @click="filters.domain = domain">{{ quizDomainLabels[domain] }}</button>
+              <button v-for="domain in domains" :key="domain" type="button" :class="['filter-chip', { active: filters.domain === domain }]" @click="filters.domain = domain">{{ quiz.domainLabel(domain) }}</button>
             </fieldset>
             <fieldset>
               <legend>난이도</legend>
@@ -148,7 +151,7 @@ function historyProgress(item: QuizSessionHistoryItem): string {
 
             <div class="quiz-start-summary">
               <span>현재 조건</span>
-              <strong>{{ quizDomainLabels[filters.domain] }} · {{ quizDifficultyLabels[filters.difficulty] }} · {{ quizModeLabels[filters.mode] }}</strong>
+              <strong>{{ quiz.domainLabel(filters.domain) }} · {{ quizDifficultyLabels[filters.difficulty] }} · {{ quizModeLabels[filters.mode] }}</strong>
               <small>사용 가능 {{ availableCount }}문제</small>
             </div>
             <p v-if="startError" class="notice error-notice" role="alert">{{ startError }}</p>
@@ -163,7 +166,7 @@ function historyProgress(item: QuizSessionHistoryItem): string {
           </div>
           <div v-if="duePreview.length" class="quiz-review-list compact">
             <article v-for="item in duePreview" :key="item.question_id">
-              <span>{{ quizDomainLabels[item.domain] }} · {{ quizDifficultyLabels[item.difficulty] }}</span>
+              <span>{{ quiz.domainLabel(item.domain) }} · {{ quizDifficultyLabels[item.difficulty] }}</span>
               <strong>{{ item.source.title }}</strong>
               <small>{{ item.next_review_at ? formatDate(item.next_review_at) : '수동 오답노트' }} · {{ item.stage }}</small>
             </article>
@@ -185,7 +188,7 @@ function historyProgress(item: QuizSessionHistoryItem): string {
             :to="item.status === 'completed' ? `/quiz/result/${item.session_id}` : `/quiz/session/${item.session_id}`"
           >
             <div>
-              <span>{{ quizDomainLabels[item.domain] }} · {{ quizDifficultyLabels[item.difficulty] }} · {{ quizModeLabels[item.mode] }}</span>
+              <span>{{ quiz.domainLabel(item.domain) }} · {{ quizDifficultyLabels[item.difficulty] }} · {{ quizModeLabels[item.mode] }}</span>
               <strong>{{ item.status === 'completed' ? '결과 보기' : '이어풀기' }}</strong>
               <small>{{ item.status === 'completed' ? formatDate(item.completed_at) : formatDate(item.started_at) }}</small>
             </div>

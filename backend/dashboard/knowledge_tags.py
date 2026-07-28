@@ -2,7 +2,6 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
 
-from .knowledge_tag_inventory import EXCLUDED_LEARNING_PATHS
 from .models import (
     Category,
     KnowledgeItem,
@@ -10,6 +9,7 @@ from .models import (
     KnowledgeTagActiveSnapshot,
     KnowledgeTagAssignment,
     KnowledgeTagMutationLock,
+    QuizDomainConfig,
 )
 
 
@@ -93,7 +93,11 @@ def normalize_manual_labels(labels) -> list[str]:
 def replace_item_tags(item_id: int, labels) -> list[str]:
     normalized_labels = normalize_manual_labels(labels)
     excluded_path_keys = {
-        Category.canonical_path_key(path) for path in EXCLUDED_LEARNING_PATHS
+        Category.canonical_path_key(path)
+        for path in QuizDomainConfig.objects.filter(enabled=True).values_list(
+            "category_path",
+            flat=True,
+        )
     }
     with transaction.atomic():
         KnowledgeTagMutationLock.lock()

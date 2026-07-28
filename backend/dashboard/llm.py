@@ -8,12 +8,18 @@ parser, so the response contract is enforced identically regardless of
 provider.
 """
 
+import logging
 import os
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 
 
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
 JSON_SYSTEM_PROMPT = "Respond with exactly one JSON object and nothing else."
+SUPPORTED_OPERATIONS = frozenset({"classify", "tagging", "quiz", "ask"})
+
+
+logger = logging.getLogger(__name__)
 
 
 class LLMConfigError(Exception):
@@ -104,10 +110,153 @@ def preflight_llm(config: LLMConfig) -> None:
             raise LLMConfigError("sdk_not_installed") from error
 
 
-def complete(config: LLMConfig, prompt: str, *, timeout: int) -> LLMResponse:
+def complete(
+    config: LLMConfig,
+    prompt: str,
+    *,
+    timeout: int,
+    operation: str,
+) -> LLMResponse:
+    if operation not in SUPPORTED_OPERATIONS:
+        raise LLMConfigError("invalid_operation")
+    cost_rates = _cost_rates()
+    _enforce_daily_budget()
     if config.provider == "anthropic":
-        return _anthropic_complete(config, prompt, timeout=timeout)
-    return _openai_complete(config, prompt, timeout=timeout)
+        response = _anthropic_complete(config, prompt, timeout=timeout)
+    else:
+        response = _openai_complete(config, prompt, timeout=timeout)
+    _record_usage(operation, config, response.usage, cost_rates=cost_rates)
+    return response
+
+
+def usage_summary(*, now=None, tolerate_invalid: bool = False) -> dict:
+    from django.apps import apps
+    from django.db.models import Sum
+    from django.utils import timezone
+
+    checked_at = now or timezone.now()
+    day_start = checked_at.astimezone(timezone.get_current_timezone()).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    model = apps.get_model("dashboard", "LLMUsageRecord")
+    totals = model.objects.filter(created_at__gte=day_start).aggregate(
+        api_calls=Sum("api_calls"),
+        total_tokens=Sum("total_tokens"),
+        estimated_cost_usd=Sum("estimated_cost_usd"),
+    )
+    configuration_error = ""
+    try:
+        limits = _budget_limits()
+        _cost_rates()
+    except LLMConfigError as error:
+        if not tolerate_invalid:
+            raise
+        configuration_error = error.code
+        limits = {
+            "api_calls": 0,
+            "total_tokens": 0,
+            "estimated_cost_usd": Decimal("0"),
+        }
+    used = {
+        "api_calls": totals["api_calls"] or 0,
+        "total_tokens": totals["total_tokens"] or 0,
+        "estimated_cost_usd": totals["estimated_cost_usd"] or Decimal("0"),
+    }
+    return {
+        "day_start": day_start,
+        "used": used,
+        "limits": limits,
+        "blocked": bool(configuration_error) or _budget_exceeded(used, limits),
+        "configuration_error": configuration_error,
+    }
+
+
+def _budget_limits() -> dict:
+    return {
+        "api_calls": _non_negative_int("LLM_DAILY_API_CALL_LIMIT"),
+        "total_tokens": _non_negative_int("LLM_DAILY_TOKEN_LIMIT"),
+        "estimated_cost_usd": _non_negative_decimal("LLM_DAILY_COST_USD_LIMIT"),
+    }
+
+
+def _non_negative_int(name: str) -> int:
+    raw = os.getenv(name, "0").strip() or "0"
+    try:
+        value = int(raw)
+    except ValueError as error:
+        raise LLMConfigError("invalid_budget") from error
+    if value < 0:
+        raise LLMConfigError("invalid_budget")
+    return value
+
+
+def _non_negative_decimal(name: str) -> Decimal:
+    raw = os.getenv(name, "0").strip() or "0"
+    try:
+        value = Decimal(raw)
+    except InvalidOperation as error:
+        raise LLMConfigError("invalid_budget") from error
+    if not value.is_finite() or value < 0:
+        raise LLMConfigError("invalid_budget")
+    return value
+
+
+def _cost_rates() -> tuple[Decimal, Decimal]:
+    return (
+        _non_negative_decimal("LLM_INPUT_COST_PER_MTOK_USD"),
+        _non_negative_decimal("LLM_OUTPUT_COST_PER_MTOK_USD"),
+    )
+
+
+def _budget_exceeded(used: dict, limits: dict) -> bool:
+    return any(
+        limits[key] > 0 and used[key] >= limits[key]
+        for key in ("api_calls", "total_tokens", "estimated_cost_usd")
+    )
+
+
+def _enforce_daily_budget() -> None:
+    summary = usage_summary()
+    if summary["blocked"]:
+        raise LLMConfigError("daily_budget_exceeded")
+
+
+def _record_usage(
+    operation: str,
+    config: LLMConfig,
+    usage: dict,
+    *,
+    cost_rates: tuple[Decimal, Decimal],
+) -> None:
+    from django.apps import apps
+
+    input_tokens = max(0, int(usage.get("input_tokens") or 0))
+    output_tokens = max(0, int(usage.get("output_tokens") or 0))
+    total_tokens = max(
+        input_tokens + output_tokens,
+        int(usage.get("total_tokens") or 0),
+    )
+    input_rate, output_rate = cost_rates
+    estimated_cost = (
+        Decimal(input_tokens) * input_rate + Decimal(output_tokens) * output_rate
+    ) / Decimal(1_000_000)
+    model = apps.get_model("dashboard", "LLMUsageRecord")
+    try:
+        model.objects.create(
+            operation=operation,
+            provider=config.provider,
+            model_name=str(usage.get("model") or config.model),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            api_calls=max(1, int(usage.get("api_calls") or 1)),
+            estimated_cost_usd=estimated_cost,
+        )
+    except Exception:
+        logger.exception("llm_usage_record_failed operation=%s", operation)
 
 
 def _anthropic_complete(config: LLMConfig, prompt: str, *, timeout: int) -> LLMResponse:

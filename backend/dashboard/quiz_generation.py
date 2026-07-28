@@ -69,6 +69,7 @@ class SourcePayload:
     source_hash: str
     title: str
     text: str
+    allowed_question_types: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,9 @@ def source_payload(candidate: QuizInventoryCandidate) -> SourcePayload:
         source_hash=candidate.source_hash,
         title=candidate.title,
         text=text,
+        allowed_question_types=tuple(
+            getattr(candidate, "allowed_question_types", ())
+        ),
     )
 
 
@@ -155,6 +159,12 @@ def source_text(item: KnowledgeItem) -> str:
     return ""
 
 
+def _allowed_question_types(source: SourcePayload) -> frozenset[str]:
+    if source.allowed_question_types:
+        return frozenset(source.allowed_question_types)
+    return frozenset(ALLOWED_TYPES_BY_DOMAIN.get(source.domain, ()))
+
+
 def build_prompt(source: SourcePayload) -> str:
     payload = {
         "instruction": (
@@ -174,7 +184,7 @@ def build_prompt(source: SourcePayload) -> str:
                 {
                     "domain": source.domain,
                     "difficulty": "beginner|intermediate|advanced",
-                    "question_type": "single_choice, or multiple_select only for aws_saa",
+                    "question_type": "|".join(_allowed_question_types(source)),
                     "prompt": "non-empty string",
                     "choices": [{"id": "stable string", "text": "non-empty string"}],
                     "correct_choice_ids": ["choice id strings"],
@@ -229,11 +239,12 @@ def _parse_question(raw_question: dict, source: SourcePayload) -> GeneratedQuest
     domain = raw_question["domain"]
     difficulty = raw_question["difficulty"]
     question_type = raw_question["question_type"]
-    if domain != source.domain or domain not in ALLOWED_TYPES_BY_DOMAIN:
+    allowed_question_types = _allowed_question_types(source)
+    if domain != source.domain or not allowed_question_types:
         raise QuizGenerationValidationError("invalid_domain")
     if difficulty not in ALLOWED_DIFFICULTIES:
         raise QuizGenerationValidationError("invalid_difficulty")
-    if question_type not in ALLOWED_TYPES_BY_DOMAIN[domain]:
+    if question_type not in allowed_question_types:
         raise QuizGenerationValidationError("invalid_question_type")
     prompt = _non_empty_string(raw_question["prompt"], "invalid_prompt")
     explanation = _non_empty_string(raw_question["explanation"], "invalid_explanation")
@@ -340,7 +351,12 @@ def invoke_llm(
 ) -> GenerationResult:
     prompt = build_prompt(source)
     try:
-        response = llm.complete(config, prompt, timeout=timeout)
+        response = llm.complete(
+            config,
+            prompt,
+            timeout=timeout,
+            operation="quiz",
+        )
     except llm.LLMTransportError as error:
         raise QuizGenerationTransientError(error.code) from error
     return GenerationResult(
@@ -574,6 +590,7 @@ def publish_questions(
             source_hash=item.source_hash,
             title=source.title,
             text=source.text,
+            allowed_question_types=source.allowed_question_types,
         )
         for generated in questions:
             question = _validate_question_model(

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { KnowledgeDetail, KnowledgeNavigationResponse, RunState } from '~/types/api'
+import type { KnowledgeDetail, KnowledgeNavigationResponse, KnowledgeVerification, RunState } from '~/types/api'
 import { affectsKnowledgeMembership, updateKnowledgeRemoval } from '~/utils/knowledgeState'
 import { knowledgeQueryParams } from '~/utils/knowledgeQuery'
 import { apiErrorCode, apiErrorMessage } from '~/utils/apiError'
@@ -11,6 +11,7 @@ import {
 const route = useRoute()
 const router = useRouter()
 const { request } = useApi()
+const { intlLocale } = useDashboardLocale()
 const item = ref<KnowledgeDetail | null>(null)
 const loading = ref(true)
 const error = ref('')
@@ -30,7 +31,7 @@ const showQuestion = computed(() => Boolean(
 ))
 const formattedGeneratedAt = computed(() => (
   item.value
-    ? new Intl.DateTimeFormat('ko-KR', {
+    ? new Intl.DateTimeFormat(intlLocale.value, {
         dateStyle: 'long',
         timeStyle: 'short',
       }).format(new Date(item.value.generated_at))
@@ -105,7 +106,7 @@ async function updateState(patch: Partial<RunState>) {
 
 function formatAuditDate(value: string | null): string {
   if (!value) return '—'
-  return new Intl.DateTimeFormat('ko-KR', {
+  return new Intl.DateTimeFormat(intlLocale.value, {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value))
@@ -149,6 +150,12 @@ async function deleteItem() {
   finally {
     deleting.value = false
   }
+}
+
+function handleVerificationUpdated(verification: KnowledgeVerification) {
+  if (!item.value) return
+  item.value = { ...item.value, verification }
+  knowledgeUpdates.value = { ...knowledgeUpdates.value, [item.value.id]: item.value }
 }
 
 watch(() => route.params.id, load, { immediate: true })
@@ -246,6 +253,12 @@ watch(() => route.params.id, load, { immediate: true })
         </div>
 
         <aside class="detail-sidebar" aria-label="분류 정보">
+          <KnowledgeVerificationPanel
+            :item-id="item.id"
+            :verification="item.verification"
+            @updated="handleVerificationUpdated"
+          />
+
           <KnowledgeTagsPanel
             :item-id="item.id"
             :tags="item.tags"

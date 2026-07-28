@@ -8,6 +8,7 @@ export const KNOWLEDGE_CONTEXT_KEYS = [
   'from',
   'to',
   'source_type',
+  'verification',
   'read',
   'bookmarked',
   'completed',

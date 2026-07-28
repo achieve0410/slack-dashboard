@@ -1,17 +1,39 @@
 # Slack Knowledge Dashboard
 
-A self-hosted knowledge dashboard that imports content from Slack channels, classifies it with an LLM, and gives you a searchable library, a quiz generator, a schedule/TODO tracker, and an API other agents can use.
+Turn useful Slack conversations into a private knowledge operations workspace — search and verify what your team knows, ask cited questions, generate quizzes, and manage schedules and TODOs.
 
 Built with Django (backend/API) and Nuxt (frontend SPA).
 
+![Slack Knowledge Dashboard overview with onboarding, knowledge signals, and today's work](docs/images/dashboard-overview.png)
+
+[Quickstart](#quickstart) · [Features](#features) · [Product tour](#product-tour) · [API guide](docs/API_GUIDE.md) · [MCP tools](docs/MCP_TOOLS.md)
+
+> Screenshots use generated sample data from `seed_demo_data`. No real Slack workspace content is included.
+
 ## Features
 
-- **Slack ingestion** — imports messages from Slack channels you configure into a knowledge base. An optional free-question view imports question threads and existing bot replies; it does not post answers to Slack. A schedule channel parses `2026-07-20 14:00~15:00 | title | notes` style messages into a calendar.
+- **Incremental Slack ingestion** — imports only messages newer than the saved per-channel checkpoint. A periodic `--full-rescan` also detects source deletions. The optional free-question view imports question threads and existing bot replies; it does not post answers to Slack. A schedule channel parses `2026-07-20 14:00~15:00 | title | notes` style messages into a calendar.
 - **LLM classification** — an Anthropic or OpenAI model classifies each imported item into a category tree it builds up over time, with confidence thresholds and a manual-review fallback.
-- **Knowledge library** — browse, search, tag, bookmark, and archive everything that's been imported and classified.
-- **Quiz generation** — generates multiple-choice/multi-select quiz questions from knowledge items classified under three built-in domains (English, Japanese, AWS certification study — see [Limitations](#limitations)), with spaced-repetition review.
+- **Cited Ask and knowledge trust** — ask the classified corpus a question, see the exact supporting knowledge items, mark answers helpful/unhelpful, and track verified, unverified, stale, and review-due knowledge.
+- **Knowledge library** — browse, search, tag, bookmark, archive, filter by verification state, and give quality feedback on imported knowledge.
+- **Configurable quiz generation** — generates multiple-choice/multi-select questions for enabled quiz-domain mappings, with spaced-repetition review. English, Japanese, and AWS SAA mappings are seeded as examples and can be changed in Django admin.
 - **Schedule / TODO** — a calendar view backed by both the web UI and a Slack channel, with keyword-based auto-categorization.
+- **Operator controls** — guided demo onboarding, LLM usage guardrails, data-retention and backup commands, source disconnect/purge controls, and an opt-in Slack operational digest.
 - **Platform API** (`/api/v1/*`) — a scoped, Bearer-token-authenticated API plus an MCP server (`integrations/dashboard_platform_mcp.py`) so other agents/tools can read the knowledge base and create tasks/artifacts/approvals. See [docs/API_GUIDE.md](docs/API_GUIDE.md) and [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
+
+## Product tour
+
+### Find, verify, and reuse Slack knowledge
+
+Browse imported knowledge by category, source, status, verification state, and saved view. Verified source records can then support cited answers in the Ask workspace.
+
+![Knowledge library with generated Slack sample data and verification filters](docs/images/knowledge-library.png)
+
+### Turn Slack messages into an agenda
+
+Create schedules and TODOs in the web UI or sync them from a dedicated Slack channel, with overdue grouping and keyword-based TODO categories.
+
+![Schedule and TODO management with generated sample data](docs/images/schedule-todo.png)
 
 ## Architecture
 
@@ -65,6 +87,13 @@ Open `http://localhost:3000`, log in with the superuser you created, and you'll 
 python backend/manage.py sync_slack
 ```
 
+Or load a clearly marked, removable sample workspace before connecting Slack:
+
+```bash
+python backend/manage.py seed_demo_data
+python backend/manage.py seed_demo_data --purge
+```
+
 Use `requirements-mysql.txt` in addition to the core lock file only when running MySQL. Source dependency ranges live in `requirements.txt`; normal installations should use the reproducible lock file.
 
 ### Slack app setup
@@ -81,7 +110,7 @@ Install the app to your workspace, copy the `xoxb-...` Bot User OAuth Token into
 
 ### LLM setup
 
-Classification, tagging, and quiz generation all go through `backend/dashboard/llm.py`, a small adapter over the Anthropic and OpenAI SDKs (no other provider is wired up). Set in `.env`:
+Classification, tagging, quiz generation, and cited Ask all go through `backend/dashboard/llm.py`, a small adapter over the Anthropic and OpenAI SDKs (no other provider is wired up). Set in `.env`:
 
 ```
 LLM_PROVIDER=anthropic          # or "openai"
@@ -91,6 +120,8 @@ ANTHROPIC_API_KEY=...
 ```
 
 Recommended Anthropic models: `claude-opus-5` (highest quality), `claude-sonnet-5` (default, good balance), `claude-haiku-4-5` (cheapest, fine for classification).
+
+Optional daily call, token, and estimated-cost limits are available through `LLM_DAILY_API_CALL_LIMIT`, `LLM_DAILY_TOKEN_LIMIT`, and `LLM_DAILY_COST_USD_LIMIT`. A value of `0` disables that individual limit. Set the per-million-token cost variables in `.env.example` if you want useful cost estimates in the operations screen.
 
 ### Running the pipelines
 
@@ -103,6 +134,10 @@ python backend/manage.py tag_knowledge --publish     # regenerate the tag snapsh
 python backend/manage.py generate_quiz_questions --publish  # generate quiz questions
 ```
 
+`sync_slack` uses saved per-channel cursors by default. Run `sync_slack --full-rescan` periodically to reconcile messages deleted at the Slack source; this hides deleted source records locally without performing irreversible deletion. `--oldest <Slack timestamp>` is available for an explicit lower bound.
+
+Quiz domains are rows in **Django admin → Quiz domain configs**. Each enabled row maps a slug to a classification category path, allowed question types, and optional allowlist requirement. The generator and UI read this configuration dynamically.
+
 `backend/deploy/run-sync.sh`, `run-classify.sh`, `run-tagging.sh`, and `run-quiz.sh` wrap these with a shared file lock (so overlapping runs don't collide) — point your scheduler at those instead of calling `manage.py` directly. Example crontab:
 
 ```
@@ -110,6 +145,30 @@ python backend/manage.py generate_quiz_questions --publish  # generate quiz ques
 30 2 * * *   /path/to/slack-dashboard/backend/deploy/run-tagging.sh >> /path/to/slack-dashboard/backend/run/tagging.log 2>&1
 30 3 * * *   /path/to/slack-dashboard/backend/deploy/run-classify.sh --limit 50 >> /path/to/slack-dashboard/backend/run/classify.log 2>&1
 ```
+
+### Optional operations and data lifecycle
+
+The following commands are deliberately opt-in. Destructive variants require an explicit confirmation flag:
+
+```bash
+# Preview or send the operational digest (never answers questions automatically)
+python backend/manage.py send_slack_digest --dry-run
+python backend/manage.py send_slack_digest --only-if-actionable
+
+# Stop future sync while retaining imported data
+python backend/manage.py disconnect_slack_source --channel-id C0123456789
+# Permanently remove that source and its derived knowledge/quiz data
+python backend/manage.py disconnect_slack_source --channel-id C0123456789 --purge --confirm
+
+# Hide expired Slack-derived data, or explicitly hard-delete it
+python backend/manage.py prune_dashboard_data --days 90
+python backend/manage.py prune_dashboard_data --days 90 --hard-delete --confirm
+
+# Write a Django JSON fixture under DASHBOARD_BACKUP_DIR (db/backups by default)
+python backend/manage.py backup_dashboard
+```
+
+The project provides the commands, not a built-in scheduler. Add only the operations you want to cron/systemd/launchd after reviewing their output with `--dry-run` or the non-destructive default where available.
 
 ### Optional MCP server
 
@@ -138,17 +197,17 @@ The MCP server runs over local stdio and calls the Platform API. Plain HTTP is a
 - The legacy `/api/*` surface is gated by Django session auth (or an optional shared-secret Bearer token via `DASHBOARD_INTERNAL_API_TOKEN`) once `DASHBOARD_AUTH_REQUIRED=1`; the SPA itself always requires a logged-in session.
 - The `/api/v1/*` Platform API uses per-agent Bearer tokens with explicit scopes (`platform:read`, `inbox:write`, `tasks:write`, `artifacts:write`, `approvals:request`, `approvals:decide`) — see [docs/API_GUIDE.md](docs/API_GUIDE.md).
 - This is a single-operator tool: there's no multi-tenant user model. Don't expose it to untrusted users.
-- No rate limiting or cost caps on the LLM-calling endpoints — if you expose classification/tagging/quiz generation to anyone but yourself, add your own.
+- Daily LLM call/token/cost guardrails are optional and disabled when their values are `0`. There is no per-user request rate limiter; keep the single-operator surface behind authentication and set non-zero budgets if cost containment matters.
 
 ## Privacy and data handling
 
-Slack content is stored by the self-hosted instance. Classification, tagging, and quiz generation send the content needed for those operations to the configured Anthropic or OpenAI API. The project does not include analytics or telemetry. Operators remain responsible for workspace authorization, notices, retention, deletion, and provider terms. Read [PRIVACY.md](PRIVACY.md) before importing real workspace content.
+Slack content is stored by the self-hosted instance. Classification, tagging, quiz generation, and cited Ask send the content needed for those operations to the configured Anthropic or OpenAI API. The opt-in Slack digest posts operational counts and up to three pending-question titles to its configured channel. The project does not include analytics or telemetry. Operators remain responsible for workspace authorization, notices, retention, deletion, backups, and provider terms. Read [PRIVACY.md](PRIVACY.md) before importing real workspace content.
 
 ## Limitations
 
-- The UI is Korean-only (this wasn't translated for the initial public release).
-- Quiz generation only targets three fixed domains: English, Japanese, and AWS certification, keyed on the classification category paths `학습/언어/영어`, `학습/언어/일본어`, `학습/자격증/AWS`. Content that doesn't get classified there won't produce quiz questions.
-- `sync_slack` re-fetches full channel history on every run; there's no incremental/`--oldest` mode yet, so very high-volume channels will be slow to sync.
+- Korean and English are available for the global navigation and cited Ask flow. Several established detail/operations screens still contain Korean copy; localization is a foundation rather than complete translation coverage.
+- Quiz domains are configurable, but a knowledge item must still be classified under an enabled domain's exact category path before it can produce questions.
+- Incremental sync cannot detect source-side deletion until `--full-rescan` runs. Reconciliation hides deleted source records; use the explicit retention/source purge commands when hard deletion is required.
 - Single-operator design — no per-user data isolation.
 
 ## Contributing and support

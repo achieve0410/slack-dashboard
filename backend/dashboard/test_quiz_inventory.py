@@ -9,6 +9,7 @@ from .models import (
     CronJob,
     KnowledgeConsumptionState,
     KnowledgeItem,
+    QuizDomainConfig,
 )
 from .quiz_inventory import collect_quiz_inventory
 
@@ -181,3 +182,30 @@ class QuizInventoryTests(TestCase):
         self.assertEqual(blocked.quarantined[0].source_key, aws.source_key)
         self.assertEqual(allowed.eligible[0].source_key, aws.source_key)
         self.assertEqual(allowed, allowed_again)
+
+    def test_admin_configured_domain_becomes_inventory_eligible(self):
+        QuizDomainConfig.objects.create(
+            slug="azure",
+            label="Azure",
+            category_path=self.other.path,
+            allowed_question_types=["single_choice", "multiple_select"],
+            sort_order=40,
+        )
+        item = self.create_cron_item(
+            external_id="azure-configured",
+            category=self.other,
+            source_hash="9" * 64,
+        )
+
+        inventory = collect_quiz_inventory()
+
+        candidate = next(
+            candidate
+            for candidate in inventory.eligible
+            if candidate.knowledge_item_id == item.pk
+        )
+        self.assertEqual(candidate.domain, "azure")
+        self.assertEqual(
+            candidate.allowed_question_types,
+            ("single_choice", "multiple_select"),
+        )

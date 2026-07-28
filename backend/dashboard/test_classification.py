@@ -833,11 +833,12 @@ class InferenceTransactionBoundaryTests(TransactionTestCase):
         response_text = json.dumps(decision_payload(new_category_path=["새 분류"]))
         captured = {}
 
-        def fake_complete(config, prompt, *, timeout):
+        def fake_complete(config, prompt, *, timeout, operation):
             self.assertFalse(connection.in_atomic_block)
             captured["config"] = config
             captured["prompt"] = prompt
             captured["timeout"] = timeout
+            captured["operation"] = operation
             return llm.LLMResponse(
                 text=response_text,
                 usage={"model": MODEL, "provider": PROVIDER, "input_tokens": 10},
@@ -851,6 +852,7 @@ class InferenceTransactionBoundaryTests(TransactionTestCase):
         self.assertEqual(prompt["item"]["body"], item.content_run.body)
         self.assertEqual(captured["config"], FAKE_LLM_CONFIG)
         self.assertEqual(captured["timeout"], 123)
+        self.assertEqual(captured["operation"], "classify")
         self.assertEqual(result.usage["input_tokens"], 10)
 
     def test_unusable_profile_is_command_level_failure(self):

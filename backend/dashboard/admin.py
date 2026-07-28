@@ -11,7 +11,11 @@ from .models import (
     ContentRun,
     CronJob,
     FreeQuestionMessage,
+    KnowledgeAsk,
+    KnowledgeAskSource,
+    KnowledgeFeedback,
     KnowledgeItem,
+    LLMUsageRecord,
     PlatformAgent,
     PlatformApiToken,
     PlatformApproval,
@@ -20,6 +24,7 @@ from .models import (
     PlatformInboxItem,
     PlatformTask,
     QuizGenerationBatch,
+    QuizDomainConfig,
     QuizProgress,
     QuizQuestion,
     QuizSession,
@@ -35,6 +40,12 @@ from .review import approve_knowledge_items
 class CitationInline(admin.TabularInline):
     model = Citation
     extra = 0
+
+
+class KnowledgeAskSourceInline(admin.TabularInline):
+    model = KnowledgeAskSource
+    extra = 0
+    readonly_fields = ("knowledge_item", "rank", "title", "excerpt", "source_url")
 
 
 class ManualApprovalForm(forms.Form):
@@ -137,11 +148,18 @@ class KnowledgeItemAdmin(admin.ModelAdmin):
         "title",
         "source_type",
         "status",
+        "verification_status",
         "category",
         "generated_at",
         "hidden_at",
     )
-    list_filter = ("source_type", "status", "category", "hidden_at")
+    list_filter = (
+        "source_type",
+        "status",
+        "verification_status",
+        "category",
+        "hidden_at",
+    )
     search_fields = ("source_key", "title", "summary", "question", "answer")
     actions = ("approve_classification",)
     readonly_fields = (
@@ -206,6 +224,29 @@ class KnowledgeItemAdmin(admin.ModelAdmin):
         )
 
 
+@admin.register(KnowledgeFeedback)
+class KnowledgeFeedbackAdmin(admin.ModelAdmin):
+    list_display = ("knowledge_item", "kind", "created_by", "created_at")
+    list_filter = ("kind",)
+    search_fields = ("knowledge_item__title", "comment")
+    readonly_fields = ("created_at",)
+
+
+@admin.register(QuizDomainConfig)
+class QuizDomainConfigAdmin(admin.ModelAdmin):
+    list_display = (
+        "slug",
+        "label",
+        "category_path",
+        "enabled",
+        "requires_allowlist",
+        "sort_order",
+    )
+    list_filter = ("enabled", "requires_allowlist")
+    search_fields = ("slug", "label", "category_path")
+    readonly_fields = ("created_at", "updated_at")
+
+
 @admin.register(QuizGenerationBatch)
 class QuizGenerationBatchAdmin(admin.ModelAdmin):
     list_display = ("inventory_version", "status", "dry_run", "candidate_count", "published_count", "started_at")
@@ -249,6 +290,56 @@ class QuizProgressAdmin(admin.ModelAdmin):
     list_display = ("question", "stage", "wrong_count", "correct_streak", "next_review_at", "mastered_at")
     list_filter = ("stage",)
     readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(LLMUsageRecord)
+class LLMUsageRecordAdmin(admin.ModelAdmin):
+    list_display = (
+        "operation",
+        "provider",
+        "model_name",
+        "total_tokens",
+        "estimated_cost_usd",
+        "created_at",
+    )
+    list_filter = ("operation", "provider")
+    search_fields = ("model_name",)
+    readonly_fields = (
+        "operation",
+        "provider",
+        "model_name",
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "api_calls",
+        "estimated_cost_usd",
+        "created_at",
+    )
+
+
+@admin.register(KnowledgeAsk)
+class KnowledgeAskAdmin(admin.ModelAdmin):
+    list_display = (
+        "question",
+        "insufficient_evidence",
+        "provider",
+        "model_name",
+        "feedback",
+        "created_at",
+    )
+    list_filter = ("insufficient_evidence", "feedback", "provider")
+    search_fields = ("question", "answer", "feedback_note")
+    readonly_fields = (
+        "question",
+        "answer",
+        "insufficient_evidence",
+        "provider",
+        "model_name",
+        "usage",
+        "created_at",
+        "updated_at",
+    )
+    inlines = (KnowledgeAskSourceInline,)
 
 
 @admin.register(FreeQuestionMessage)

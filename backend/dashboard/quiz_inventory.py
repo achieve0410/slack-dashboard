@@ -4,13 +4,7 @@ from typing import Iterable
 
 from django.db.models import Q
 
-from .models import Category, ContentRun, KnowledgeItem
-
-
-ENGLISH_PATH = "학습/언어/영어"
-JAPANESE_PATH = "학습/언어/일본어"
-AWS_PATH = "학습/자격증/AWS"
-
+from .models import Category, ContentRun, KnowledgeItem, QuizDomainConfig
 
 @dataclass(frozen=True)
 class QuizInventoryCandidate:
@@ -20,6 +14,7 @@ class QuizInventoryCandidate:
     source_hash: str
     title: str
     category_path: str
+    allowed_question_types: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -45,17 +40,16 @@ def collect_quiz_inventory(
 ) -> QuizInventoryResult:
     allowlisted_external_ids = frozenset(aws_allowlisted_external_ids)
     allowlisted_source_keys = frozenset(aws_allowlisted_source_keys)
-    supported_paths = {
-        Category.canonical_path_key(ENGLISH_PATH): "english",
-        Category.canonical_path_key(JAPANESE_PATH): "japanese",
-        Category.canonical_path_key(AWS_PATH): "aws_saa",
+    domain_configs = {
+        Category.canonical_path_key(config.category_path): config
+        for config in QuizDomainConfig.objects.filter(enabled=True)
     }
     queryset = (
         KnowledgeItem.objects.select_related("category", "content_run", "content_run__job")
         .filter(
             status=KnowledgeItem.Status.CLASSIFIED,
             hidden_at__isnull=True,
-            category__path_key__in=supported_paths,
+            category__path_key__in=domain_configs,
         )
         .filter(Q(consumption_state__isnull=True) | Q(consumption_state__archived_at__isnull=True))
         .order_by("category__path_key", "source_key", "pk")
@@ -66,10 +60,12 @@ def collect_quiz_inventory(
         source_text = _source_text(item)
         if not source_text:
             continue
-        domain = supported_paths[item.category.path_key]
-        if domain == "aws_saa":
-            reason = _aws_quarantine_reason(
+        config = domain_configs[item.category.path_key]
+        domain = config.slug
+        if config.requires_allowlist:
+            reason = _allowlist_quarantine_reason(
                 item,
+                domain=domain,
                 allowlisted_external_ids=allowlisted_external_ids,
                 allowlisted_source_keys=allowlisted_source_keys,
             )
@@ -84,6 +80,7 @@ def collect_quiz_inventory(
                 source_hash=item.source_hash,
                 title=item.title,
                 category_path=item.category.path,
+                allowed_question_types=tuple(config.allowed_question_types),
             )
         )
     return QuizInventoryResult(
@@ -108,18 +105,20 @@ def _source_text(item: KnowledgeItem) -> str:
     return ""
 
 
-def _aws_quarantine_reason(
+def _allowlist_quarantine_reason(
     item: KnowledgeItem,
     *,
+    domain: str,
     allowlisted_external_ids: frozenset[str],
     allowlisted_source_keys: frozenset[str],
 ) -> str:
+    reason_prefix = "aws" if domain == "aws_saa" else domain
     if item.source_type != KnowledgeItem.SourceType.CRON:
-        return "aws_slack_qa_requires_explicit_review"
+        return f"{reason_prefix}_slack_qa_requires_explicit_review"
     external_id = item.content_run.job.external_id if item.content_run and item.content_run.job else ""
     if item.source_key in allowlisted_source_keys or external_id in allowlisted_external_ids:
         return ""
-    return "aws_cron_not_allowlisted"
+    return f"{reason_prefix}_cron_not_allowlisted"
 
 
 def _quarantine(item: KnowledgeItem, reason: str) -> QuizInventoryQuarantine:
@@ -145,6 +144,7 @@ def _inventory_version(
                 candidate.source_key,
                 candidate.source_hash,
                 candidate.domain,
+                ",".join(candidate.allowed_question_types),
             )
         )
         digest.update(f"{value}\n".encode())

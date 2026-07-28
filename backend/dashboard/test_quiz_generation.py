@@ -148,6 +148,26 @@ class QuizGenerationParserTests(SimpleTestCase):
         with self.assertRaises(QuizGenerationValidationError):
             self.parse(multiple_select)
 
+    def test_configured_domain_controls_allowed_question_types(self):
+        source = SourcePayload(
+            item=None,
+            domain="azure",
+            source_key="cron:azure",
+            source_hash="a" * 64,
+            title="Azure source",
+            text="The source says Correct in this paragraph.",
+            allowed_question_types=("single_choice", "multiple_select"),
+        )
+        payload = valid_payload(
+            domain="azure",
+            question_type="multiple_select",
+        )
+
+        question = parse_generation(json.dumps(payload), source)[0]
+
+        self.assertEqual(question.domain, "azure")
+        self.assertEqual(question.question_type, "multiple_select")
+
 
 class QuizGenerationBatchTests(TestCase):
     def setUp(self):

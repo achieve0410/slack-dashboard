@@ -17,7 +17,9 @@ from django.utils.dateparse import parse_date, parse_datetime
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_http_methods
 
+from . import llm
 from .access import dashboard_staff_required, staff_required_response
+from .data_lifecycle import lifecycle_status
 from .knowledge_actions import (
     UNDO_WINDOW,
     KnowledgeActionError,
@@ -27,6 +29,13 @@ from .knowledge_actions import (
     normalize_target_ids,
     restore_items,
     undo_hide_snapshot,
+)
+from .knowledge_ask import (
+    AskError,
+    ask_history,
+    ask_knowledge,
+    parse_history_limit as parse_ask_history_limit,
+    update_ask_feedback,
 )
 from .knowledge_filters import (
     KnowledgeFilterError,
@@ -39,6 +48,12 @@ from .knowledge_tags import (
     attach_tag_labels,
     item_tag_labels,
     replace_item_tags,
+)
+from .knowledge_verification import (
+    VerificationError,
+    create_feedback,
+    update_verification,
+    verification_payload,
 )
 from .models import (
     BulkSelectionSnapshot,
@@ -54,6 +69,7 @@ from .models import (
     UserResponse,
 )
 from .operation_runs import operations_summary
+from .onboarding import onboarding_status, purge_demo_data, seed_demo_data
 from .quiz_sessions import (
     QuizApiError,
     answer_item,
@@ -203,6 +219,9 @@ def job_payload(job: CronJob) -> dict:
         "last_error": job.last_error,
         "last_run_at": job.last_run_at,
         "next_run_at": job.next_run_at,
+        "sync_cursor_ts": job.sync_cursor_ts,
+        "last_import_count": job.last_import_count,
+        "disconnected_at": job.disconnected_at,
         "thread_ts": job.thread_ts,
         "model_name": job.model_name,
     }
@@ -340,6 +359,7 @@ def knowledge_card_payload(item: KnowledgeItem) -> dict:
         "detail_url": knowledge_detail_url(item),
         "content_run_id": item.content_run_id,
         "state": state_payload(state_for_item(item)),
+        "verification": verification_payload(item),
     }
     if item.source_type == KnowledgeItem.SourceType.SLACK_QA:
         payload.update(
@@ -380,6 +400,7 @@ def knowledge_detail_payload(item: KnowledgeItem) -> dict:
         ),
         "reviewed_at": item.reviewed_at,
         "state": state_payload(state_for_item(item)),
+        "verification": verification_payload(item),
     }
     if item.source_type == KnowledgeItem.SourceType.SLACK_QA:
         payload.update(
@@ -412,7 +433,8 @@ def knowledge_base_queryset():
         "consumption_state",
         "content_run",
         "content_run__job",
-    )
+        "verification_owner",
+    ).prefetch_related("feedback_entries")
 
 
 def knowledge_filter_error(error: KnowledgeFilterError) -> JsonResponse:
@@ -665,6 +687,20 @@ def summary(request: HttpRequest) -> JsonResponse:
     ).count()
     day_start, day_end = local_day_bounds()
     knowledge_items = active_knowledge_items()
+    checked_at = timezone.now()
+    stale_verification = (
+        Q(verification_status=KnowledgeItem.VerificationStatus.STALE)
+        | Q(classification_stale_at__isnull=False)
+        | Q(review_due_at__isnull=False, review_due_at__lte=checked_at)
+    )
+    stale_verification_count = knowledge_items.filter(stale_verification).count()
+    verified_count = (
+        knowledge_items.filter(
+            verification_status=KnowledgeItem.VerificationStatus.VERIFIED
+        )
+        .exclude(stale_verification)
+        .count()
+    )
     inbox_items = knowledge_items.filter(
         source_type=KnowledgeItem.SourceType.SLACK_QA,
         status__in=(
@@ -709,6 +745,16 @@ def summary(request: HttpRequest) -> JsonResponse:
                 ).count(),
                 "scheduled_today": today_events.count(),
             },
+            "verification": {
+                "verified": verified_count,
+                "stale": stale_verification_count,
+                "unverified": max(
+                    0,
+                    knowledge_items.count()
+                    - verified_count
+                    - stale_verification_count,
+                ),
+            },
             "categories": [
                 {**item, "label": category_labels.get(item["category"], "기타")}
                 for item in category_counts
@@ -726,6 +772,27 @@ def summary(request: HttpRequest) -> JsonResponse:
             ],
             "operations": operations,
             "backlog": backlog,
+            "llm_usage": llm.usage_summary(tolerate_invalid=True),
+            "data_policy": lifecycle_status(),
+            "onboarding": onboarding_status(),
+        }
+    )
+
+
+@require_http_methods(["GET", "POST", "DELETE"])
+def onboarding(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        return JsonResponse(onboarding_status())
+    if not request.user.is_authenticated:
+        return JsonResponse(
+            {"error": "인증이 필요합니다.", "code": "auth_required"},
+            status=403,
+        )
+    summary = seed_demo_data() if request.method == "POST" else purge_demo_data()
+    return JsonResponse(
+        {
+            "summary": summary,
+            "onboarding": onboarding_status(),
         }
     )
 
@@ -749,6 +816,8 @@ def operations(request: HttpRequest) -> JsonResponse:
         {
             "operations": operation_status,
             "backlog": backlog,
+            "llm_usage": llm.usage_summary(tolerate_invalid=True),
+            "data_policy": lifecycle_status(),
             "count": total,
             "limit": limit,
             "offset": offset,
@@ -932,6 +1001,47 @@ def search(request: HttpRequest) -> JsonResponse:
             "results": [knowledge_card_payload(item) for item in items],
         }
     )
+
+
+@require_http_methods(["GET", "POST"])
+def knowledge_ask(request: HttpRequest) -> JsonResponse:
+    if not request.user.is_authenticated:
+        return JsonResponse(
+            {"error": "인증이 필요합니다.", "code": "auth_required"},
+            status=403,
+        )
+    try:
+        if request.method == "GET":
+            limit = parse_ask_history_limit(request.GET.get("limit", "20"))
+            return JsonResponse(ask_history(limit=limit))
+        data = parse_json(request)
+        return JsonResponse(ask_knowledge(data), status=201)
+    except InvalidJsonError:
+        return invalid_json_response(code="invalid_request")
+    except AskError as error:
+        return JsonResponse(
+            {"error": error.message, "code": error.code},
+            status=error.status,
+        )
+
+
+@require_http_methods(["PATCH"])
+def knowledge_ask_feedback(request: HttpRequest, ask_id: int) -> JsonResponse:
+    if not request.user.is_authenticated:
+        return JsonResponse(
+            {"error": "인증이 필요합니다.", "code": "auth_required"},
+            status=403,
+        )
+    try:
+        data = parse_json(request)
+        return JsonResponse(update_ask_feedback(ask_id, data))
+    except InvalidJsonError:
+        return invalid_json_response(code="invalid_request")
+    except AskError as error:
+        return JsonResponse(
+            {"error": error.message, "code": error.code},
+            status=error.status,
+        )
 
 
 def saved_knowledge_view_payload(view: SavedKnowledgeView) -> dict:
@@ -1432,7 +1542,14 @@ def knowledge_trash(request: HttpRequest) -> JsonResponse:
     limit, offset = pagination
     queryset = (
         KnowledgeItem.objects.filter(hidden_at__isnull=False)
-        .select_related("category", "consumption_state", "content_run", "content_run__job")
+        .select_related(
+            "category",
+            "consumption_state",
+            "content_run",
+            "content_run__job",
+            "verification_owner",
+        )
+        .prefetch_related("feedback_entries")
         .order_by("-hidden_at", "-id")
     )
     total = queryset.count()
@@ -1465,7 +1582,14 @@ def knowledge_restore(_request: HttpRequest, item_id: int) -> HttpResponse | Jso
 def knowledge_detail(request: HttpRequest, item_id: int) -> JsonResponse | HttpResponse:
     item = (
         visible_knowledge_items()
-        .select_related("category", "consumption_state", "content_run", "reviewed_by")
+        .select_related(
+            "category",
+            "consumption_state",
+            "content_run",
+            "reviewed_by",
+            "verification_owner",
+        )
+        .prefetch_related("feedback_entries")
         .filter(pk=item_id)
         .first()
     )
@@ -1527,6 +1651,53 @@ def knowledge_state(request: HttpRequest, item_id: int) -> JsonResponse:
 
 
 @require_http_methods(["PATCH"])
+def knowledge_verification(request: HttpRequest, item_id: int) -> JsonResponse:
+    if not request.user.is_authenticated:
+        return JsonResponse(
+            {"error": "인증이 필요합니다.", "code": "auth_required"},
+            status=403,
+        )
+    try:
+        data = parse_json(request)
+        item = update_verification(item_id, data, request.user)
+    except InvalidJsonError:
+        return invalid_json_response(code="invalid_request")
+    except VerificationError as error:
+        return JsonResponse(
+            {"error": error.message, "code": error.code},
+            status=404 if error.code == "not_found" else 400,
+        )
+    return JsonResponse(verification_payload(item))
+
+
+@require_http_methods(["POST"])
+def knowledge_feedback(request: HttpRequest, item_id: int) -> JsonResponse:
+    if not request.user.is_authenticated:
+        return JsonResponse(
+            {"error": "인증이 필요합니다.", "code": "auth_required"},
+            status=403,
+        )
+    try:
+        data = parse_json(request)
+        item, feedback = create_feedback(item_id, data, request.user)
+    except InvalidJsonError:
+        return invalid_json_response(code="invalid_request")
+    except VerificationError as error:
+        return JsonResponse(
+            {"error": error.message, "code": error.code},
+            status=404 if error.code == "not_found" else 400,
+        )
+    return JsonResponse(
+        {
+            "id": feedback.id,
+            "kind": feedback.kind,
+            "verification": verification_payload(item),
+        },
+        status=201,
+    )
+
+
+@require_http_methods(["PATCH"])
 def knowledge_classification(request: HttpRequest, item_id: int) -> JsonResponse:
     item = get_object_or_404(visible_knowledge_items(), pk=item_id)
     try:
@@ -1550,8 +1721,11 @@ def knowledge_classification(request: HttpRequest, item_id: int) -> JsonResponse
             status=409,
         )
     item = KnowledgeItem.objects.select_related(
-        "category", "consumption_state", "reviewed_by"
-    ).get(pk=item.pk)
+        "category",
+        "consumption_state",
+        "reviewed_by",
+        "verification_owner",
+    ).prefetch_related("feedback_entries").get(pk=item.pk)
     attach_tag_labels([item], snapshot_id=active_tag_snapshot_id())
     return JsonResponse(knowledge_detail_payload(item))
 
@@ -1562,7 +1736,8 @@ def free_question(request: HttpRequest) -> JsonResponse:
     if isinstance(pagination, JsonResponse):
         return pagination
     limit, offset = pagination
-    queryset = active_knowledge_items().select_related("consumption_state").filter(
+    queryset = knowledge_base_queryset().filter(
+        consumption_state__archived_at__isnull=True,
         source_type=KnowledgeItem.SourceType.SLACK_QA,
         status__in=(
             KnowledgeItem.Status.AWAITING_ANSWER,
@@ -1772,7 +1947,10 @@ def runs(request: HttpRequest) -> JsonResponse:
 def run_detail(request: HttpRequest, run_id: int) -> JsonResponse | HttpResponse:
     current_session = session_key(request)
     run = get_object_or_404(
-        run_queryset(current_session, include_archived=True), pk=run_id
+        run_queryset(current_session, include_archived=True)
+        .select_related("knowledge_item__verification_owner")
+        .prefetch_related("knowledge_item__feedback_entries"),
+        pk=run_id,
     )
     if request.method == "DELETE":
         hidden_at = timezone.now()

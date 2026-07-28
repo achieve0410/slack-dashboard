@@ -14,6 +14,7 @@ from .models import (
     KnowledgeConsumptionState,
     KnowledgeItem,
     QuizGenerationBatch,
+    QuizDomainConfig,
     QuizProgress,
     QuizQuestion,
     QuizSession,
@@ -194,6 +195,14 @@ class QuizApiTests(TestCase):
         self.create_question("hiddenq", item=hidden_item)
         archived_item = self.create_item("archived", archived=True)
         self.create_question("archivedq", item=archived_item)
+        QuizDomainConfig.objects.create(
+            slug="disabled",
+            label="Disabled",
+            category_path="학습/비활성",
+            allowed_question_types=["single_choice"],
+            enabled=False,
+        )
+        self.create_question("disabledq", domain="disabled")
 
         payload = self.client.get("/api/quiz/catalog/").json()
 

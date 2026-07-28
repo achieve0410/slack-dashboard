@@ -220,7 +220,12 @@ def invoke_llm(
 ) -> InferenceResult:
     prompt = build_prompt(item, catalog)
     try:
-        response = llm.complete(config, prompt, timeout=timeout)
+        response = llm.complete(
+            config,
+            prompt,
+            timeout=timeout,
+            operation="classify",
+        )
     except llm.LLMTransportError as error:
         raise TransientInferenceError(error.code) from error
     return InferenceResult(

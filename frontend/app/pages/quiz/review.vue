@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import type { QuizDifficulty, QuizDomain, QuizReviewItem, QuizReviewResponse } from '~/types/api'
+import type { QuizCatalogResponse, QuizDifficulty, QuizDomain, QuizReviewItem, QuizReviewResponse } from '~/types/api'
 import { apiErrorMessage } from '~/utils/apiError'
 
 const router = useRouter()
 const quiz = useQuizApi()
-const domains: Array<QuizDomain | ''> = ['', 'english', 'japanese', 'aws_saa']
+const catalog = ref<QuizCatalogResponse | null>(null)
+const domains = computed<Array<QuizDomain | ''>>(() => ['', ...(catalog.value?.domains || [])])
 const difficulties: Array<QuizDifficulty | ''> = ['', 'beginner', 'intermediate', 'advanced']
 const filters = reactive<{ domain: QuizDomain | '', difficulty: QuizDifficulty | '', dueOnly: boolean }>({
   domain: '',
@@ -23,11 +24,16 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    review.value = await quiz.review({
-      domain: filters.domain || undefined,
-      difficulty: filters.difficulty || undefined,
-      dueOnly: filters.dueOnly,
-    })
+    const [catalogData, reviewData] = await Promise.all([
+      quiz.catalog(),
+      quiz.review({
+        domain: filters.domain || undefined,
+        difficulty: filters.difficulty || undefined,
+        dueOnly: filters.dueOnly,
+      }),
+    ])
+    catalog.value = catalogData
+    review.value = reviewData
   }
   catch (reason) {
     error.value = apiErrorMessage(reason, '오답노트를 불러오지 못했습니다.')
@@ -41,7 +47,7 @@ async function startMode(mode: 'review' | 'wrong', item?: QuizReviewItem) {
   if (starting.value) return
   starting.value = true
   error.value = ''
-  const domain = item?.domain || filters.domain || 'english'
+  const domain = item?.domain || filters.domain || catalog.value?.domains[0] || 'english'
   const difficulty = item?.difficulty || filters.difficulty || 'beginner'
   try {
     const session = await quiz.startSession({ domain, difficulty, mode })
@@ -92,7 +98,7 @@ function dateLabel(value: string | null): string {
     </header>
 
     <section class="content-view quiz-review-controls" aria-label="오답노트 필터">
-      <label><span>분야</span><select v-model="filters.domain" @change="load"><option v-for="domain in domains" :key="domain || 'all'" :value="domain">{{ domain ? quizDomainLabels[domain] : '전체' }}</option></select></label>
+      <label><span>분야</span><select v-model="filters.domain" @change="load"><option v-for="domain in domains" :key="domain || 'all'" :value="domain">{{ domain ? quiz.domainLabel(domain) : '전체' }}</option></select></label>
       <label><span>난이도</span><select v-model="filters.difficulty" @change="load"><option v-for="difficulty in difficulties" :key="difficulty || 'all'" :value="difficulty">{{ difficulty ? quizDifficultyLabels[difficulty] : '전체' }}</option></select></label>
       <label class="check-field"><input v-model="filters.dueOnly" type="checkbox" @change="load"><span>오늘 복습할 문제만</span></label>
       <button class="action-button" type="button" :disabled="loading" @click="load">적용</button>
@@ -116,7 +122,7 @@ function dateLabel(value: string | null): string {
     <section v-else-if="review?.items.length" class="quiz-review-list" aria-label="오답노트 항목">
       <article v-for="item in review.items" :key="item.question_id">
         <div>
-          <span>{{ quizDomainLabels[item.domain] }} · {{ quizDifficultyLabels[item.difficulty] }} · {{ item.stage }}</span>
+          <span>{{ quiz.domainLabel(item.domain) }} · {{ quizDifficultyLabels[item.difficulty] }} · {{ item.stage }}</span>
           <strong>{{ item.source.title }}</strong>
           <small>다음 복습 {{ dateLabel(item.next_review_at) }} · 오답 {{ item.wrong_count }}회 · 연속 정답 {{ item.correct_streak }}회</small>
           <NuxtLink :to="item.source.detail_url">원본 지식 열기</NuxtLink>

@@ -51,7 +51,7 @@ pydantic==2.13.4
     # via
     #   anthropic
     #   openai
-pydantic-core==2.46.4
+pydantic-core==2.47.0
     # via pydantic
 slack-sdk==3.43.0
     # via -r requirements.txt

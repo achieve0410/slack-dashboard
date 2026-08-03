@@ -43,7 +43,7 @@ jiter==0.16.0
     # via
     #   anthropic
     #   openai
-openai==2.49.0
+openai==2.51.0
     # via -r requirements.txt
 packaging==26.2
     # via gunicorn

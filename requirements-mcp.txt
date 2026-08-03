@@ -1,2 +1,2 @@
 # Optional: install to run integrations/dashboard_platform_mcp.py.
-mcp>=1.28,<2
+mcp>=2.0.0,<3

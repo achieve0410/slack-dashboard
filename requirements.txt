@@ -1,4 +1,4 @@
-Django>=6.0,<6.1
+Django>=6.1.1,<6.2
 gunicorn>=26.0.0,<27
 slack-sdk>=3.39,<4
 whitenoise>=6.11,<7
